@@ -126,6 +126,7 @@ function Invoices({ session }) {
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
+  const [query, setQuery] = useState('')
 
   async function load() {
     // Row Level Security scopes this query to the signed-in user's invoices.
@@ -163,6 +164,8 @@ function Invoices({ session }) {
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
   const outstanding = invoices.filter((i) => i.status !== 'paid').reduce((sum, i) => sum + i.amount_cents, 0)
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? invoices.filter((i) => i.client_name.toLowerCase().includes(needle)) : invoices
 
   return (
     <div className="app">
@@ -221,29 +224,40 @@ function Invoices({ session }) {
         ) : invoices.length === 0 ? (
           <p className="muted empty">No invoices yet. Create your first one above.</p>
         ) : (
-          <ul className="list">
-            {invoices.map((inv) => (
-              <li key={inv.id} className="card invoice">
-                <div className="row">
-                  <strong>{inv.client_name}</strong>
-                  <span className="amount">{money(inv.amount_cents, inv.currency)}</span>
-                </div>
-                <div className="row muted">
-                  <span>{inv.client_email || 'No email'}</span>
-                  <span>Due {day(inv.due_date)}</span>
-                </div>
-                {inv.note && <p className="note">{inv.note}</p>}
-                <div className="row">
-                  <span className={`pill ${inv.status}`}>{inv.status}</span>
-                  {inv.status !== 'paid' && (
-                    <button className="link" onClick={() => markPaid(inv.id)}>
-                      Mark paid
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <input
+              type="search"
+              className="search"
+              placeholder="Search by client"
+              aria-label="Search invoices by client name"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {shown.length === 0 && <p className="muted empty">No invoices for "{query.trim()}".</p>}
+            <ul className="list">
+              {shown.map((inv) => (
+                <li key={inv.id} className="card invoice">
+                  <div className="row">
+                    <strong>{inv.client_name}</strong>
+                    <span className="amount">{money(inv.amount_cents, inv.currency)}</span>
+                  </div>
+                  <div className="row muted">
+                    <span>{inv.client_email || 'No email'}</span>
+                    <span>Due {day(inv.due_date)}</span>
+                  </div>
+                  {inv.note && <p className="note">{inv.note}</p>}
+                  <div className="row">
+                    <span className={`pill ${inv.status}`}>{inv.status}</span>
+                    {inv.status !== 'paid' && (
+                      <button className="link" onClick={() => markPaid(inv.id)}>
+                        Mark paid
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </main>
     </div>
