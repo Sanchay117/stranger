@@ -1,5 +1,9 @@
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { homedir } from 'node:os'
+
+// Reports get committed, so local paths show as ~/... instead of naming the user's home folder.
+const tidy = (text) => text.split(homedir()).join('~')
 
 const HINTS = {
   supabase: (cfg, table = '<table>') => [
@@ -51,9 +55,9 @@ export function writeReport(cfg, result) {
       credits: (result.ownerRun?.credits ?? 0) + (result.strangerRun?.credits ?? 0),
     }) + '\n',
   )
-  writeFileSync(reportPath, report(cfg, result))
+  writeFileSync(reportPath, tidy(report(cfg, result)))
 
-  if (result.verdict === 'LEAK') writeFileSync(fixPath, fix(cfg, result))
+  if (result.verdict === 'LEAK') writeFileSync(fixPath, tidy(fix(cfg, result)))
   else if (result.verdict === 'CLEAN') rmSync(fixPath, { force: true })
 
   return {

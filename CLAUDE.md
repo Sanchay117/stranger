@@ -12,7 +12,8 @@ Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app wit
 
 ## Status
 - 16 Nov: repo started. Stranger picked. Kane CLI 0.10.4 installed, not logged in yet (needs the user's TestMu AI account).
-- 16 Nov evening: Duebook demo app, migration and seed script written (no Supabase project yet). Stranger CLI, skill and Stop hook written and tested against a stand-in Kane; not yet run against real Kane. Next: Kane login, Supabase project, first real red run.
+- 16 Nov evening: Duebook demo app, migration and seed script written. Stranger CLI, skill and Stop hook written and tested against a stand-in Kane.
+- 16 Nov 18:30: Supabase project live (Tokyo, IPv4 pooler URL), migration applied, demo data seeded. Two real Stranger runs against local Duebook both said LEAK. A full check takes about 4 minutes and 50 credits (10,986 credits left). Kane's share links (`test_url`) open without a TestMu login. Next: the closed loop with a fresh agent (LEAK, fix migration, CLEAN), a way to put the live demo back in its leaky state, GitHub repo and Vercel deploys, landing page.
 
 ## How this entry is judged (short)
 Three gates, then four equal scores (Ships, Verified, Closed loop, Craft). Full detail in `HACKATHON.md`.

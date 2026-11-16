@@ -2,10 +2,11 @@
 
 Signed in as **stranger@duebook.demo**, Kane could see a record that only **maya@duebook.demo** created.
 
-- Canary the owner planted: `stranger-canary-1577d1`
+- Canary the owner planted: `stranger-canary-afb57e`
 - How it showed up: on the page
-- Kane's failing check: assert: the text "stranger-canary-1577d1" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J6PNY0CJ33XDQTJS3J3NG0/dashboard/share/US_TEKB8VYBSV9JSJ977G4S76SWKP4NI4W9PAXGBGO82HMULT0PKK58B4KMMDD0RZRU?type=summary&agentView=true&fqdn=summary-page
+- Tables the stranger's page read: `invoices`
+- Kane's failing check: assert: the text "stranger-canary-afb57e" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J7445WJJF4J9HEDY5990DR/dashboard/share/US_AXCN64531FX215G8MXCEUXZ03K68DKLZ7PE0ZIAOC7JI320IP742NE1CETY5QAFP?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
@@ -17,8 +18,8 @@ Find the SELECT policy on the leaking table. A policy like `using (true)` ("Enab
 Replace it with a policy that only returns the signed-in user's rows, for example:
 
 ```sql
-drop policy if exists "Enable read access for all users" on public.<table>;
-create policy "Owners can read their own rows" on public.<table>
+drop policy if exists "Enable read access for all users" on public.invoices;
+create policy "Owners can read their own rows" on public.invoices
   for select to authenticated
   using ((select auth.uid()) = user_id);
 ```
