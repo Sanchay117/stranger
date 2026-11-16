@@ -7,6 +7,9 @@ HACKATHON.md
 .stranger/hook-state.json
 .stranger/last.json
 
+# Kane CLI writes test files here, with variable values (passwords) in plain text
+.testmuai/
+
 # Secrets
 .env
 .env.*

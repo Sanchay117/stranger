@@ -42,6 +42,13 @@ Verify these after install; details in `HACKATHON.md`.
 - Evidence pack: `kane-cli evidence serve <path-to-pack>`
 - Objectives must not need user prompts (`ask_user` is off without a TTY).
 
+Learned from real runs (16 Nov, Kane 0.10.4):
+- Works against `http://localhost:5231`. A login-and-check run took 75 s and about 19 credits.
+- Step lines are `{step, status: running|done, remark}`; remarks start with the action (`navigate:`, `type:`, `analyze:`, `assert:`). Variables show as `{{global.email}}` in remarks, never their values, so anything Stranger must match in remarks goes into the objective as literal text.
+- `run_end` adds `result_code` (100 = success), `reason_code`, `summary`, `final_state`, `per_flow_metadata`, and a shareable `test_url`.
+- The evidence pack (`<session_dir>/evidence/*.evidence`, a zip) holds `logs/0-network.har` with response bodies for API calls, plus per-step screenshots.
+- **Kane writes `.testmuai/tests/<name>_test.md` into its working folder with variable values, secrets included, in plain text.** Never run Kane from the repo root; Stranger runs it inside `.stranger/runs/<run>/`. `.testmuai/` is gitignored.
+
 ## Layout
 - `demo/`: Duebook, the deliberately leaky invoicing app Stranger is shown on (Vite + React + Supabase). The leak is on purpose. Never fix it by hand: fixes happen only through the Stranger loop, so the history shows Kane finding it and the agent fixing it.
   - No sign-up, ever: judges get one-click logins ("Open as Maya, the owner" / "Open as a stranger", or `?as=stranger` in the URL). The demo account emails and passwords are public on purpose (Vite `envPrefix` exposes `OWNER_*` and `STRANGER_*`); service and database secrets must never get one of those prefixes.

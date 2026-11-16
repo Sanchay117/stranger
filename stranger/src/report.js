@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const HINTS = {
-  supabase: (cfg) => [
+  supabase: (cfg, table = '<table>') => [
     'This app reads its data straight from Supabase, so the database decides who sees which rows (Row Level Security).',
     '',
     'Find the SELECT policy on the leaking table. A policy like `using (true)` ("Enable read access for all users") lets every account, and anyone holding the public anon key, read every row.',
@@ -10,8 +10,8 @@ const HINTS = {
     'Replace it with a policy that only returns the signed-in user\'s rows, for example:',
     '',
     '```sql',
-    'drop policy if exists "Enable read access for all users" on public.<table>;',
-    'create policy "Owners can read their own rows" on public.<table>',
+    `drop policy if exists "Enable read access for all users" on public.${table};`,
+    `create policy "Owners can read their own rows" on public.${table}`,
     '  for select to authenticated',
     '  using ((select auth.uid()) = user_id);',
     '```',
@@ -95,8 +95,9 @@ function report(cfg, r) {
 }
 
 function fix(cfg, r) {
-  const hints = (HINTS[cfg.database] ?? HINTS.unknown)(cfg)
   const where = r.evidence?.find((h) => h.url)?.url
+  const table = where?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1]
+  const hints = (HINTS[cfg.database] ?? HINTS.unknown)(cfg, table)
   return [
     '# Stranger found a data leak',
     '',
@@ -104,7 +105,7 @@ function fix(cfg, r) {
     '',
     `- Canary the owner planted: \`${r.canary}\``,
     `- How it showed up: ${r.seen === 'network' ? 'in a server response the browser received' : 'on the page'}`,
-    where ? `- Response that carried it: ${where}` : null,
+    where ? `- Response that carried it: ${where}${table ? ` (table \`${table}\`)` : ''}` : null,
     r.strangerRun?.failedStep ? `- Kane's failing check: ${r.strangerRun.failedStep.remark}` : null,
     r.strangerRun?.testUrl ? `- Kane run: ${r.strangerRun.testUrl}` : null,
     `- Full report: .stranger/report.md`,

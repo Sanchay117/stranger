@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 
 // Runs one Kane CLI objective in agent mode and collects its NDJSON stream.
 // vars: { name: { value, secret? } }. Secrets go through a 0600 temp file, never argv.
-export function runKane({ objective, url, vars, name, timeout = 420, headless = true, logFile, onEvent }) {
+export function runKane({ objective, url, vars, name, timeout = 420, headless = true, cwd, logFile, onEvent }) {
   const dir = mkdtempSync(join(tmpdir(), 'stranger-'))
   const varsFile = join(dir, 'vars.json')
   writeFileSync(varsFile, JSON.stringify(vars), { mode: 0o600 })
@@ -16,6 +16,7 @@ export function runKane({ objective, url, vars, name, timeout = 420, headless = 
   return new Promise((resolvePromise) => {
     const started = Date.now()
     const child = spawn(process.env.KANE_CLI_BIN || 'kane-cli', args, {
+      cwd,
       env: { ...process.env, KANE_CLI_USER_AGENT: 'stranger' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })

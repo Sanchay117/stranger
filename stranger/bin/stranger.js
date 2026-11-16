@@ -86,7 +86,7 @@ const result = await check(cfg, {
   onProgress: ({ phase, event, canary, run }) => {
     if (phase === 'owner' && canary) say(`\n  ${labels.owner} ${dim(canary)}`)
     if (phase === 'stranger' && canary) say(`\n  ${labels.stranger}`)
-    if (event && event.step !== undefined && (event.status === 'done' || event.status === 'failed')) {
+    if (event && event.step !== undefined && (event.status === 'failed' || (event.status === 'done' && event.remark))) {
       const key = `${phase}:${event.step}:${event.status}`
       if (seenSteps.has(key)) return
       seenSteps.add(key)

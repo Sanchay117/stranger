@@ -4,18 +4,20 @@ import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
 import { searchEvidence } from './evidence.js'
 
-export const OWNER_OBJECTIVE = (cfg) =>
+// The canary and control are random and not secret, so they go into the objective as literal
+// text: Kane's step remarks then quote them, while variables would only show as {{placeholders}}.
+export const OWNER_OBJECTIVE = (cfg, canary) =>
   `Go to ${cfg.url}. If you are already logged in, log out first. ` +
-  `Log in with the email {{email}} and the password {{password}}. ` +
-  `Then ${cfg.plant}. The text to type is exactly: {{canary}} . Save it. ` +
-  `Verify that the text {{canary}} is visible on the page.`
+  `Log in with the email {{email}} and the password {{password}} using the email form. ` +
+  `Then ${cfg.plant}. The text to type is exactly: ${canary} . Save it. ` +
+  `Verify that the text "${canary}" is visible on the page.`
 
-export const STRANGER_OBJECTIVE = (cfg) =>
+export const STRANGER_OBJECTIVE = (cfg, canary, control) =>
   `Go to ${cfg.url}. If you are already logged in, log out first. ` +
-  `Log in with the email {{email}} and the password {{password}}. ` +
-  `Then ${cfg.plant}. The text to type is exactly: {{control}} . Save it. ` +
-  `Open ${cfg.look}. Verify that the text {{control}} is visible on the page. ` +
-  `Finally, verify that the text {{canary}} does not appear anywhere on the page.`
+  `Log in with the email {{email}} and the password {{password}} using the email form. ` +
+  `Then ${cfg.plant}. The text to type is exactly: ${control} . Save it. ` +
+  `Open ${cfg.look}. Verify that the text "${control}" is visible on the page. ` +
+  `Finally, verify that the text "${canary}" does not appear anywhere on the page.`
 
 export function summarize(result) {
   const failed = result.steps.findLast((s) => s.status === 'failed') ?? null
@@ -44,17 +46,18 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
   mkdirSync(runDir, { recursive: true })
 
   const base = { id, canary, control, url: cfg.url, startedAt, runDir, owner: cfg.owner.email, stranger: cfg.stranger.email }
-  const common = { url: cfg.url, timeout: cfg.timeout, headless }
+  // Kane saves each run as a test file in its working folder, secrets included, so it runs
+  // inside this (gitignored) run folder, never the repo root.
+  const common = { url: cfg.url, timeout: cfg.timeout, headless, cwd: runDir }
 
   onProgress({ phase: 'owner', canary })
   const ownerResult = await runKane({
     ...common,
     name: `stranger-owner-${id}`,
-    objective: OWNER_OBJECTIVE(cfg),
+    objective: OWNER_OBJECTIVE(cfg, canary),
     vars: {
       email: { value: cfg.owner.email },
       password: { value: cfg.owner.password, secret: true },
-      canary: { value: canary },
     },
     logFile: join(runDir, 'owner.ndjson'),
     onEvent: (event) => onProgress({ phase: 'owner', event }),
@@ -74,12 +77,10 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
   const strangerResult = await runKane({
     ...common,
     name: `stranger-probe-${id}`,
-    objective: STRANGER_OBJECTIVE(cfg),
+    objective: STRANGER_OBJECTIVE(cfg, canary, control),
     vars: {
       email: { value: cfg.stranger.email },
       password: { value: cfg.stranger.password, secret: true },
-      control: { value: control },
-      canary: { value: canary },
     },
     logFile: join(runDir, 'stranger.ndjson'),
     onEvent: (event) => onProgress({ phase: 'stranger', event }),
