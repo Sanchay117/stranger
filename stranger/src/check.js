@@ -2,18 +2,19 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
-import { searchEvidence } from './evidence.js'
+import { searchEvidence, restTables } from './evidence.js'
 
 // The canary and control are random and not secret, so they go into the objective as literal
 // text: Kane's step remarks then quote them, while variables would only show as {{placeholders}}.
+// Every Kane run starts in a fresh browser, so there is nothing to log out of first.
 export const OWNER_OBJECTIVE = (cfg, canary) =>
-  `Go to ${cfg.url}. If you are already logged in, log out first. ` +
+  `Go to ${cfg.url}. ` +
   `Log in with the email {{email}} and the password {{password}} using the email form. ` +
   `Then ${cfg.plant}. The text to type is exactly: ${canary} . Save it. ` +
   `Verify that the text "${canary}" is visible on the page.`
 
 export const STRANGER_OBJECTIVE = (cfg, canary, control) =>
-  `Go to ${cfg.url}. If you are already logged in, log out first. ` +
+  `Go to ${cfg.url}. ` +
   `Log in with the email {{email}} and the password {{password}} using the email form. ` +
   `Then ${cfg.plant}. The text to type is exactly: ${control} . Save it. ` +
   `Open ${cfg.look}. Verify that the text "${control}" is visible on the page. ` +
@@ -87,9 +88,10 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
   })
   const stranger = summarize(strangerResult)
   const evidence = searchEvidence(stranger.sessionDir, canary).hits
+  const tables = restTables(stranger.sessionDir)
   onProgress({ phase: 'stranger-done', run: stranger, evidence })
 
-  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence }
+  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, tables }
 
   if (passed(strangerResult)) {
     if (evidence.length) {

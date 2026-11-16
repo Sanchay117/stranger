@@ -39,7 +39,8 @@ const { count } = await admin.from('invoices').select('id', { count: 'exact', he
 if (count > 0) {
   console.log(`owner already has ${count} invoices, leaving them`)
 } else {
-  const { error } = await admin.from('invoices').insert(sample.map((row) => ({ ...row, user_id: owner.id })))
+  // A bulk insert sends one column set for every row, so give each row every column.
+  const { error } = await admin.from('invoices').insert(sample.map((row) => ({ status: 'unpaid', ...row, user_id: owner.id })))
   if (error) throw error
   console.log(`inserted ${sample.length} invoices for ${owner.email}`)
 }

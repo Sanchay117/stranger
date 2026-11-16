@@ -96,7 +96,7 @@ function report(cfg, r) {
 
 function fix(cfg, r) {
   const where = r.evidence?.find((h) => h.url)?.url
-  const table = where?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1]
+  const table = where?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1] ?? (r.tables?.length === 1 ? r.tables[0] : undefined)
   const hints = (HINTS[cfg.database] ?? HINTS.unknown)(cfg, table)
   return [
     '# Stranger found a data leak',
@@ -106,6 +106,7 @@ function fix(cfg, r) {
     `- Canary the owner planted: \`${r.canary}\``,
     `- How it showed up: ${r.seen === 'network' ? 'in a server response the browser received' : 'on the page'}`,
     where ? `- Response that carried it: ${where}${table ? ` (table \`${table}\`)` : ''}` : null,
+    !where && r.tables?.length ? `- Tables the stranger's page read: ${r.tables.map((t) => `\`${t}\``).join(', ')}` : null,
     r.strangerRun?.failedStep ? `- Kane's failing check: ${r.strangerRun.failedStep.remark}` : null,
     r.strangerRun?.testUrl ? `- Kane run: ${r.strangerRun.testUrl}` : null,
     `- Full report: .stranger/report.md`,
