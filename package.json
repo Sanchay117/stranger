@@ -20,6 +20,7 @@
   "scripts": {
     "db:apply": "node --env-file=.env scripts/db-apply.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
+    "demo:reset": "node --env-file=.env scripts/demo-reset.mjs",
     "demo": "npm --prefix demo run dev",
     "stranger": "node stranger/bin/stranger.js run"
   },
