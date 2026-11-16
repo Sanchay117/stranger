@@ -1,0 +1,14 @@
+{
+  "name": "stranger-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:apply": "node --env-file=.env scripts/db-apply.mjs",
+    "db:seed": "node --env-file=.env scripts/seed.mjs",
+    "demo": "npm --prefix demo run dev"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "pg": "^8.23.1"
+  }
+}

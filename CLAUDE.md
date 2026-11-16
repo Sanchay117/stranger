@@ -2,6 +2,8 @@
 
 Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app with an AI coding agent, verify it with Kane CLI, ship it.
 
+**The project: Stranger.** "You only ever test your app as yourself. Stranger tests it as someone else." Kane signs in as the owner and plants a random canary, then signs in as a second user and looks for it. If the stranger can see it, the app leaks other users' data. The coding agent fixes it at the database and Stranger runs again until it is clean.
+
 **Deadline: Thu 19 Nov 2026, 11:59 PM IST. No pushes after it.**
 
 ## Read first
@@ -9,7 +11,7 @@ Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app wit
 - Keep this file current. When the stack, commands, Kane loop or status change, update the matching section here in the same change.
 
 ## Status
-- 16 Nov: repo started. Idea not chosen. Kane CLI not installed or logged in yet.
+- 16 Nov: repo started. Stranger picked. Kane CLI 0.10.4 installed, not logged in yet (needs the user's TestMu AI account). Building the demo app first.
 
 ## How this entry is judged (short)
 Three gates, then four equal scores (Ships, Verified, Closed loop, Craft). Full detail in `HACKATHON.md`.
@@ -39,5 +41,16 @@ Verify these after install; details in `HACKATHON.md`.
 - Evidence pack: `kane-cli evidence serve <path-to-pack>`
 - Objectives must not need user prompts (`ask_user` is off without a TTY).
 
+## Layout
+- `demo/`: Duebook, the deliberately leaky invoicing app Stranger is shown on (Vite + React + Supabase). The leak is on purpose. Never fix it by hand: fixes happen only through the Stranger loop, so the history shows Kane finding it and the agent fixing it.
+- `supabase/migrations/`: database schema and policies, applied in order. A data-leak fix is always a new migration here, never a client-side filter.
+- `scripts/`: apply migrations and seed demo users and invoices (needs `.env`).
+- `stranger/`: the Stranger CLI that drives Kane.
+- `site/`: the landing page judges see.
+- `.claude/`: the Stranger skill and the opt-in Stop hook (the closed loop).
+
 ## Stack and commands
-To fill in once the idea is picked: install, dev server, tests, deploy, and the command that runs the Kane loop.
+- Node 24, npm. Secrets in `.env` at the repo root (copy `.env.example`); load with `node --env-file=.env`.
+- Demo app: `cd demo && npm install && npm run dev`
+- Database: `npm run db:apply` (all migrations), `npm run db:seed` (demo users and invoices)
+- Stranger and the loop: to fill in once the CLI exists.
