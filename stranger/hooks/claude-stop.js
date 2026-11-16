@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Claude Code Stop hook. While Stranger is armed (.stranger/armed exists, or STRANGER_HOOK=1),
 // the agent cannot finish a turn that changed watched files until Stranger says CLEAN.
-// On a LEAK it blocks the stop and hands the agent .stranger/FIX.md. Gives up after 3 tries.
+// On a LEAK it blocks the stop and hands the agent .stranger/FIX.md.
+// Two limits keep it from trapping the agent: after 3 Stranger runs that still found a leak, and after
+// 2 reminders where nothing changed (the agent can't or shouldn't fix it and has said why), it lets go.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -9,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const MAX_TRIES = 3
+const MAX_NUDGES = 2
 let input = {}
 try {
   input = JSON.parse(readFileSync(0, 'utf8') || '{}')
@@ -62,20 +65,26 @@ const save = () => writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n
 const fp = fingerprint(config.watch?.length ? config.watch : ['.'])
 const session = input.session_id ?? 'default'
 state.tries ??= {}
+state.nudges ??= {}
 
 if (fp === state.cleanAt) process.exit(0)
 
-if ((state.tries[session] ?? 0) >= MAX_TRIES) {
-  reply({ systemMessage: `Stranger still saw a leak after ${MAX_TRIES} tries in this session. Stopping so a person can look: .stranger/report.md` })
-}
-
-if (fp === state.leakAt && input.stop_hook_active) {
-  state.tries[session] = (state.tries[session] ?? 0) + 1
+// Nothing changed since the last leak: no new Kane run, just a reminder, at most MAX_NUDGES per user turn.
+if (fp === state.leakAt) {
+  if (!input.stop_hook_active) state.nudges[session] = 0
+  state.nudges[session] = (state.nudges[session] ?? 0) + 1
   save()
+  if (state.nudges[session] > MAX_NUDGES) {
+    reply({ systemMessage: `Stranger: still LEAK, and nothing in the watched files changed after ${MAX_NUDGES} reminders. Letting the agent stop so a person can decide: .stranger/report.md` })
+  }
   reply({
     decision: 'block',
     reason: 'Stranger found a data leak and nothing in the watched files has changed since. Read .stranger/FIX.md and fix it at the database, or tell the user plainly why you cannot.',
   })
+}
+
+if ((state.tries[session] ?? 0) >= MAX_TRIES) {
+  reply({ systemMessage: `Stranger still saw a leak after ${MAX_TRIES} checks of the agent's changes in this session. Stopping so a person can look: .stranger/report.md` })
 }
 
 // Inside the Stranger repo the CLI sits next to this file. Copied into another project by
@@ -91,6 +100,7 @@ try {
 } catch {}
 
 if (!result) reply({ systemMessage: `Stranger could not run (exit ${run.status}). ${String(run.stderr).trim().split('\n').at(-1) ?? ''}` })
+state.nudges[session] = 0
 
 if (result.verdict === 'CLEAN') {
   state.cleanAt = fp
