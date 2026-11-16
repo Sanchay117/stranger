@@ -13,7 +13,8 @@ Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app wit
 ## Status
 - 16 Nov: repo started. Stranger picked. Kane CLI 0.10.4 installed, not logged in yet (needs the user's TestMu AI account).
 - 16 Nov evening: Duebook demo app, migration and seed script written. Stranger CLI, skill and Stop hook written and tested against a stand-in Kane.
-- 16 Nov 18:30: Supabase project live (Tokyo, IPv4 pooler URL), migration applied, demo data seeded. Two real Stranger runs against local Duebook both said LEAK. A full check takes about 4 minutes and 50 credits (10,986 credits left). Kane's share links (`test_url`) open without a TestMu login. Next: the closed loop with a fresh agent (LEAK, fix migration, CLEAN), a way to put the live demo back in its leaky state, GitHub repo and Vercel deploys, landing page.
+- 16 Nov 18:30: Supabase project live (Tokyo, IPv4 pooler URL), migration applied, demo data seeded. Two real Stranger runs against local Duebook both said LEAK. A full check takes about 4 minutes and 50 credits (10,986 credits left). Kane's share links (`test_url`) open without a TestMu login. 
+- 16 Nov night: repo public at github.com/Sanchay117/stranger, Vercel deploy at stranger-2yf3.vercel.app (Duebook only so far). Built the Stranger product page (served at `/`, Duebook moved to `/duebook/`): the hero replays the real LEAK run afb57e and links to the live leak. The repo root is now the CLI package, so `npx github:Sanchay117/stranger run` works; `stranger install-claude` adds the skill and hook to any project. Not pushed yet: pushing redeploys Vercel. Next: the closed loop with a fresh agent (LEAK, fix migration, CLEAN), a way to put the live demo back in its leaky state, README.
 
 ## How this entry is judged (short)
 Three gates, then four equal scores (Ships, Verified, Closed loop, Craft). Full detail in `HACKATHON.md`.
@@ -51,19 +52,22 @@ Learned from real runs (16 Nov, Kane 0.10.4):
 - **Kane writes `.testmuai/tests/<name>_test.md` into its working folder with variable values, secrets included, in plain text.** Never run Kane from the repo root; Stranger runs it inside `.stranger/runs/<run>/`. `.testmuai/` is gitignored.
 
 ## Layout
-- `demo/`: Duebook, the deliberately leaky invoicing app Stranger is shown on (Vite + React + Supabase). The leak is on purpose. Never fix it by hand: fixes happen only through the Stranger loop, so the history shows Kane finding it and the agent fixing it.
-  - No sign-up, ever: judges get one-click logins ("Open as Maya, the owner" / "Open as a stranger", or `?as=stranger` in the URL). The demo account emails and passwords are public on purpose (Vite `envPrefix` exposes `OWNER_*` and `STRANGER_*`); service and database secrets must never get one of those prefixes.
+- `demo/`: one Vite build (Vercel's root directory) with two pages.
+  - `index.html` + `site/`: the Stranger product page judges land on, at `/`. Hero = composer + replay of a real Kane run (`site/replay-<id>.json`, made by `scripts/export-replay.mjs`). Proof screenshot in `public/proof/`. Built with the product-led-site skill: tokens in `site/site.css`, blob shader colours in `site/main.js`; keep glass only over the blob, keep it to three sections. Any demo content must say it is a replay.
+  - `duebook/index.html` + `src/`: Duebook, the deliberately leaky invoicing app Stranger is shown on (React + Supabase), at `/duebook/`. The leak is on purpose. Never fix it by hand: fixes happen only through the Stranger loop, so the history shows Kane finding it and the agent fixing it.
+  - No sign-up, ever: judges get one-click logins ("Open as Maya, the owner" / "Open as a stranger", or `/duebook/?as=stranger`). The demo account emails and passwords are public on purpose (Vite `envPrefix` exposes `OWNER_*` and `STRANGER_*`); service and database secrets must never get one of those prefixes.
 - `supabase/migrations/`: database schema and policies, applied in order. A data-leak fix is always a new migration here, never a client-side filter.
-- `scripts/`: apply migrations and seed demo users and invoices (needs `.env`).
-- `stranger/`: the Stranger CLI that drives Kane.
-- `site/`: the landing page judges see.
-- `.claude/`: the Stranger skill and the opt-in Stop hook (the closed loop).
+- `scripts/`: apply migrations, seed demo users and invoices (needs `.env`), export a run as the page's replay.
+- `stranger/`: the Stranger CLI that drives Kane. The repo root `package.json` is its package (`bin`, `files`), so `npx github:Sanchay117/stranger <command>` installs only `stranger/`. Keep runtime code dependency-free; `pg` and `supabase-js` are devDependencies for `scripts/`.
+- `.claude/`: the Stranger skill and the opt-in Stop hook for this repo (the closed loop). `stranger install-claude` copies the same pair into another project (`.claude/hooks/stranger-stop.js`, which falls back to npx).
 
 ## Stack and commands
 - Node 24, npm. Secrets in `.env` at the repo root (copy `.env.example`); load with `node --env-file=.env`.
-- Demo app: `cd demo && npm install && npm run dev`
+- Site and demo app: `cd demo && npm install && npm run dev` (port 5231 in `.claude/launch.json` one level up: `/` is the Stranger page, `/duebook/` is Duebook). `npm run build` must produce both `dist/index.html` and `dist/duebook/index.html`.
+- New replay for the page after a real run: `node scripts/export-replay.mjs <run id>`, then point the import in `demo/site/main.js` at it.
 - Database: `npm run db:apply` (all migrations), `npm run db:seed` (demo users and invoices)
 - Stranger: `npm run stranger` (add `-- --json` for one machine-readable line, `-- --headed` to watch the browser). Exit 0 CLEAN, 1 LEAK, 2 INCONCLUSIVE, 3 setup error. Config: `stranger.config.json` (values like `$OWNER_PASSWORD` come from `.env`).
-- Each run writes `.stranger/report.md`, appends `.stranger/history.jsonl` (tracked as proof), and on a LEAK writes `.stranger/FIX.md` for the agent. Raw Kane NDJSON per run sits in `.stranger/runs/` (ignored).
+- Each run writes `.stranger/report.md`, appends `.stranger/history.jsonl` (tracked as proof), and on a LEAK writes `.stranger/FIX.md` for the agent. Raw Kane NDJSON per run sits in `.stranger/runs/` (ignored). Every command adds the run folders and `.testmuai/` to `.gitignore` in any git repo it runs in, because Kane writes the test passwords there.
+- Other commands: `stranger init` (starter config), `stranger install-claude` (skill + Stop hook into `.claude/`). Check the package before pushing: `npm pack --dry-run` should list only `stranger/` files.
 - The loop: the `stranger` skill (`.claude/skills/stranger/`) tells the agent how to act on a verdict. `touch .stranger/armed` arms the Stop hook in `.claude/settings.json`: after watched files change, the agent can't finish until Stranger says CLEAN. `rm .stranger/armed` disarms it. Keep it disarmed while building Stranger itself, or every stop costs two Kane runs.
 - Testing Stranger without Kane credits: point `KANE_CLI_BIN` at a stand-in that prints Kane's agent-mode NDJSON.

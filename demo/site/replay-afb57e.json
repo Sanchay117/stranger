@@ -1,0 +1,122 @@
+{
+  "id": "afb57e",
+  "at": "2026-11-16T12:58:44.670Z",
+  "verdict": "LEAK",
+  "why": "Signed in as stranger@duebook.demo, Kane found the owner's canary on the page.",
+  "canary": "stranger-canary-afb57e",
+  "control": "stranger-control-afb57e",
+  "owner": "maya@duebook.demo",
+  "stranger": "stranger@duebook.demo",
+  "ownerRun": {
+    "status": "passed",
+    "seconds": 114,
+    "credits": 25.5,
+    "testUrl": "https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J70NGTYXV8194J12SZ536Q/dashboard/share/US_QYQ9FRGPLTT35D0V2SBZ3EKO10QPXH2X63U1TGSF4TH08UR4LS4A3MRMDNKSAI0S?type=summary&agentView=true&fqdn=summary-page",
+    "steps": [
+      {
+        "ok": true,
+        "text": "navigate: Navigate to http://localhost:5231"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the email\" into \"Email\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the password\" into \"Password\""
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking Log in using the email form"
+      },
+      {
+        "ok": true,
+        "text": "wait: wait 1000 ms for the login request to finish"
+      },
+      {
+        "ok": true,
+        "text": "wait: Waiting confirm the logged-in invoice dashboard is visible"
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking New invoice button"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"Stranger check\" into \"Client name\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"1\" into \"Amount (USD)\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"stranger-canary-afb57e\" into \"Note\""
+      },
+      {
+        "ok": true,
+        "text": "click: Click \"Save invoice\""
+      },
+      {
+        "ok": true,
+        "text": "assert: the text \"stranger-canary-afb57e\" is visible on the page"
+      }
+    ]
+  },
+  "strangerRun": {
+    "status": "failed",
+    "seconds": 131,
+    "credits": 23.4,
+    "testUrl": "https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J7445WJJF4J9HEDY5990DR/dashboard/share/US_AXCN64531FX215G8MXCEUXZ03K68DKLZ7PE0ZIAOC7JI320IP742NE1CETY5QAFP?type=summary&agentView=true&fqdn=summary-page",
+    "steps": [
+      {
+        "ok": true,
+        "text": "navigate: Navigate to http://localhost:5231"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the email\" into \"Email\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the password\" into \"Password\""
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking Log in using the email form button"
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking New invoice"
+      },
+      {
+        "ok": true,
+        "text": "type: Typing Stranger check into Client name field"
+      },
+      {
+        "ok": true,
+        "text": "type: Entering invoice amount in Amount (USD) field"
+      },
+      {
+        "ok": true,
+        "text": "type: Typing the invoice note text"
+      },
+      {
+        "ok": true,
+        "text": "click: Saving the invoice"
+      },
+      {
+        "ok": true,
+        "text": "wait: Open the Your invoices list on the main page"
+      },
+      {
+        "ok": true,
+        "text": "assert: the text \"stranger-control-afb57e\" is visible on the page"
+      },
+      {
+        "ok": false,
+        "text": "assert: the text \"stranger-canary-afb57e\" does not appear anywhere on the page"
+      }
+    ]
+  }
+}

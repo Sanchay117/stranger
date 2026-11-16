@@ -10,7 +10,8 @@ const day = (iso) =>
 function Banner() {
   return (
     <div className="banner" role="note">
-      Demo app with a security bug left in on purpose, so Stranger has something to catch. Please don't enter real details.
+      Demo app with a security bug left in on purpose, so Stranger has something to catch. Please don't enter real details.{' '}
+      <a href="/">What is Stranger?</a>
     </div>
   )
 }
