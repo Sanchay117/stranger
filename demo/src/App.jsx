@@ -47,59 +47,72 @@ function NotConfigured() {
   )
 }
 
+// Two public demo accounts, so nobody has to sign up. ?as=owner or ?as=stranger logs straight in.
+const DEMO = {
+  owner: { email: import.meta.env.OWNER_EMAIL, password: import.meta.env.OWNER_PASSWORD, label: 'Open as Maya, the owner' },
+  stranger: { email: import.meta.env.STRANGER_EMAIL, password: import.meta.env.STRANGER_PASSWORD, label: 'Open as a stranger' },
+}
+
 function Auth() {
-  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
-  async function submit(e) {
-    e.preventDefault()
+  async function logIn(creds) {
     setBusy(true)
     setMessage('')
-    const { data, error } =
-      mode === 'login'
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password })
+    const { error } = await supabase.auth.signInWithPassword(creds)
     setBusy(false)
-    if (error) return setMessage(error.message)
-    if (mode === 'signup' && !data.session) setMessage('Check your email to confirm your account.')
+    if (error) setMessage(error.message)
   }
+
+  useEffect(() => {
+    const as = new URLSearchParams(window.location.search).get('as')
+    if (DEMO[as]?.email) {
+      window.history.replaceState(null, '', window.location.pathname)
+      logIn({ email: DEMO[as].email, password: DEMO[as].password })
+    }
+  }, [])
 
   return (
     <main className="auth">
       <h1 className="logo">Duebook</h1>
       <p className="tagline">Send invoices. Get paid on time.</p>
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>
-          Log in
-        </button>
-        <button role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => setMode('signup')}>
-          Sign up
-        </button>
+
+      <div className="demo">
+        {Object.entries(DEMO).map(([key, d]) =>
+          d.email ? (
+            <button key={key} className={key === 'stranger' ? 'primary' : 'secondary'} disabled={busy} onClick={() => logIn({ email: d.email, password: d.password })}>
+              {d.label}
+            </button>
+          ) : null,
+        )}
+        <p className="muted small">Maya has a few invoices. The stranger has none of their own, so anything they see belongs to someone else.</p>
       </div>
-      <form onSubmit={submit} className="card">
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          logIn({ email, password })
+        }}
+        className="card"
+        aria-label="Log in with email"
+      >
+        <p className="muted small">Or log in with email</p>
         <label>
           Email
           <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
         <label>
           Password
-          <input
-            type="password"
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
-            minLength={6}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         <button className="primary" disabled={busy}>
-          {busy ? 'One moment' : mode === 'login' ? 'Log in' : 'Create account'}
+          {busy ? 'One moment' : 'Log in'}
         </button>
-        {message && <p className="message">{message}</p>}
       </form>
+      {message && <p className="message">{message}</p>}
     </main>
   )
 }

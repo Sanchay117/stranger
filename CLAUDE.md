@@ -44,6 +44,7 @@ Verify these after install; details in `HACKATHON.md`.
 
 ## Layout
 - `demo/`: Duebook, the deliberately leaky invoicing app Stranger is shown on (Vite + React + Supabase). The leak is on purpose. Never fix it by hand: fixes happen only through the Stranger loop, so the history shows Kane finding it and the agent fixing it.
+  - No sign-up, ever: judges get one-click logins ("Open as Maya, the owner" / "Open as a stranger", or `?as=stranger` in the URL). The demo account emails and passwords are public on purpose (Vite `envPrefix` exposes `OWNER_*` and `STRANGER_*`); service and database secrets must never get one of those prefixes.
 - `supabase/migrations/`: database schema and policies, applied in order. A data-leak fix is always a new migration here, never a client-side filter.
 - `scripts/`: apply migrations and seed demo users and invoices (needs `.env`).
 - `stranger/`: the Stranger CLI that drives Kane.
