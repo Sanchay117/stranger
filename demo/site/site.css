@@ -57,7 +57,13 @@ code { font-family: var(--mono); font-size: .88em; }
 .nav nav a:hover { color: var(--ink); }
 
 /* Hero */
-.hero { position: relative; overflow: hidden; isolation: isolate; padding: 120px 16px clamp(150px, 24vw, 260px); text-align: center; }
+/* The blob can reach past the hero's bottom edge. The last 120px fade out (only blob lives there),
+   so it never ends in a hard horizontal cut at any width. */
+.hero {
+  position: relative; overflow: hidden; isolation: isolate; padding: 120px 16px clamp(150px, 24vw, 260px); text-align: center;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
+}
 .hero-inner { max-width: 980px; margin: 0 auto; }
 .eyebrow {
   display: inline-flex; gap: 6px; align-items: center; margin-bottom: 26px;
@@ -247,7 +253,7 @@ section h2 {
 
 @media (max-width: 760px) {
   .nav nav a:not(:last-child) { display: none; }
-  .hero { padding: 104px 16px 56px; }
+  .hero { padding: 104px 16px 150px; }
   .lede { font-size: 16px; margin-bottom: 36px; }
   .composer { flex-wrap: wrap; border-radius: var(--radius-l); padding: 8px; }
   .scheme { padding-left: 12px; }
