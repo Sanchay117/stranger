@@ -1,0 +1,16 @@
+# Local strategy notes
+HACKATHON.md
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+dist/
+.next/
+.vercel/
+
+# OS
+.DS_Store
