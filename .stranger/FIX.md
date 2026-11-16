@@ -2,11 +2,11 @@
 
 Signed in as **stranger@duebook.demo**, Kane could see a record that only **maya@duebook.demo** created.
 
-- Canary the owner planted: `stranger-canary-afb57e`
+- Canary the owner planted: `stranger-canary-f5b2cc`
 - How it showed up: on the page
 - Tables the stranger's page read: `invoices`
-- Kane's failing check: assert: the text "stranger-canary-afb57e" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J7445WJJF4J9HEDY5990DR/dashboard/share/US_AXCN64531FX215G8MXCEUXZ03K68DKLZ7PE0ZIAOC7JI320IP742NE1CETY5QAFP?type=summary&agentView=true&fqdn=summary-page
+- Kane's failing check: assert: the text "stranger-canary-f5b2cc" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7JBVNX0WRHTEJF9MXTP1E39/dashboard/share/US_4UGM76WIWN73PFNGZ2X23WBXQTDH8PYUZ8CW2D2AJ3E0CIXFCJHBNVUB34ZUDGL4?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
