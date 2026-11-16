@@ -78,8 +78,13 @@ if (fp === state.leakAt && input.stop_hook_active) {
   })
 }
 
+// Inside the Stranger repo the CLI sits next to this file. Copied into another project by
+// "stranger install-claude", it runs the published CLI through npx instead.
 const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'stranger.js')
-const run = spawnSync(process.execPath, [bin, 'run', '--json'], { cwd: root, encoding: 'utf8', timeout: 15 * 60 * 1000 })
+const [cmd, args] = existsSync(bin)
+  ? [process.execPath, [bin, 'run', '--json']]
+  : ['npx', ['--yes', 'github:Sanchay117/stranger', 'run', '--json']]
+const run = spawnSync(cmd, args, { cwd: root, encoding: 'utf8', timeout: 15 * 60 * 1000 })
 let result = null
 try {
   result = JSON.parse(run.stdout.trim().split('\n').at(-1))

@@ -12,7 +12,7 @@ Stranger signs in to the app as the owner and plants a random canary, then signs
 From the repo root (needs `stranger.config.json`, a `.env` with the two test accounts, and `kane-cli login` done once):
 
 ```bash
-npx stranger run --json
+npx --yes github:Sanchay117/stranger run --json
 ```
 
 It takes a few minutes and prints one JSON line: `verdict`, `why`, `canary`, `report`, `fix`, and the Kane run links.
@@ -39,4 +39,4 @@ Commit the fix on its own with a message that says what Stranger found and the c
 
 ## Keep it honest automatically
 
-`touch .stranger/armed` turns on the Stop hook (`stranger/hooks/claude-stop.js`): when watched files changed, the agent cannot finish until Stranger says CLEAN, and on a LEAK it gets the fix brief back. `rm .stranger/armed` turns it off.
+`touch .stranger/armed` turns on the Stop hook (`.claude/hooks/stranger-stop.js`, added by `stranger install-claude`): when watched files changed, the agent cannot finish until Stranger says CLEAN, and on a LEAK it gets the fix brief back. `rm .stranger/armed` turns it off.

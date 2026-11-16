@@ -4,12 +4,14 @@ import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
 import { writeReport } from '../src/report.js'
+import { ensureGitignore, installClaude } from '../src/install.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
 
 Usage
-  stranger run     Plant a canary as the owner, then look for it as a second account (two Kane CLI runs)
-  stranger init    Write a starter stranger.config.json
+  stranger run             Plant a canary as the owner, then look for it as a second account (two Kane CLI runs)
+  stranger init            Write a starter stranger.config.json
+  stranger install-claude  Add the Stranger skill and Stop hook to this project's .claude/
 
 Options
   --config <path>  Config file (default: stranger.config.json)
@@ -50,13 +52,24 @@ if (values.help || command === 'help') {
   process.exit(0)
 }
 
+// Kane writes the test accounts' passwords into its run folder, so run folders never go into git.
+const ignored = ensureGitignore(process.cwd())
+if (ignored.length) say(dim(`Added to .gitignore: ${ignored.join(', ')}`))
+
 if (command === 'init') {
   if (existsSync(values.config)) {
     console.error(`${values.config} already exists`)
     process.exit(3)
   }
   writeFileSync(values.config, JSON.stringify(TEMPLATE, null, 2) + '\n')
-  console.log(`Wrote ${values.config}. Set OWNER_* and STRANGER_* in .env: two accounts you own on the app.`)
+  console.log(`Wrote ${values.config}. Set OWNER_* and STRANGER_* in .env: two test accounts you own on the app.`)
+  process.exit(0)
+}
+
+if (command === 'install-claude') {
+  for (const line of installClaude(process.cwd())) console.log(line)
+  console.log('\nArm the hook with: touch .stranger/armed   (disarm: rm .stranger/armed)')
+  if (!existsSync(values.config)) console.log('No stranger.config.json yet: run "stranger init" first.')
   process.exit(0)
 }
 

@@ -1,14 +1,29 @@
 {
-  "name": "stranger-monorepo",
+  "name": "stranger-check",
+  "version": "0.1.0",
   "private": true,
+  "description": "You only ever test your app as yourself. Stranger tests it as someone else, with Kane CLI.",
   "type": "module",
+  "bin": {
+    "stranger": "stranger/bin/stranger.js"
+  },
+  "files": [
+    "stranger/bin",
+    "stranger/src",
+    "stranger/hooks",
+    "stranger/skill"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "license": "MIT",
   "scripts": {
     "db:apply": "node --env-file=.env scripts/db-apply.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
     "demo": "npm --prefix demo run dev",
     "stranger": "node stranger/bin/stranger.js run"
   },
-  "dependencies": {
+  "devDependencies": {
     "@supabase/supabase-js": "^2.119.0",
     "pg": "^8.23.1"
   }
