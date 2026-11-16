@@ -11,7 +11,8 @@ Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app wit
 - Keep this file current. When the stack, commands, Kane loop or status change, update the matching section here in the same change.
 
 ## Status
-- 16 Nov: repo started. Stranger picked. Kane CLI 0.10.4 installed, not logged in yet (needs the user's TestMu AI account). Building the demo app first.
+- 16 Nov: repo started. Stranger picked. Kane CLI 0.10.4 installed, not logged in yet (needs the user's TestMu AI account).
+- 16 Nov evening: Duebook demo app, migration and seed script written (no Supabase project yet). Stranger CLI, skill and Stop hook written and tested against a stand-in Kane; not yet run against real Kane. Next: Kane login, Supabase project, first real red run.
 
 ## How this entry is judged (short)
 Three gates, then four equal scores (Ships, Verified, Closed loop, Craft). Full detail in `HACKATHON.md`.
@@ -53,4 +54,7 @@ Verify these after install; details in `HACKATHON.md`.
 - Node 24, npm. Secrets in `.env` at the repo root (copy `.env.example`); load with `node --env-file=.env`.
 - Demo app: `cd demo && npm install && npm run dev`
 - Database: `npm run db:apply` (all migrations), `npm run db:seed` (demo users and invoices)
-- Stranger and the loop: to fill in once the CLI exists.
+- Stranger: `npm run stranger` (add `-- --json` for one machine-readable line, `-- --headed` to watch the browser). Exit 0 CLEAN, 1 LEAK, 2 INCONCLUSIVE, 3 setup error. Config: `stranger.config.json` (values like `$OWNER_PASSWORD` come from `.env`).
+- Each run writes `.stranger/report.md`, appends `.stranger/history.jsonl` (tracked as proof), and on a LEAK writes `.stranger/FIX.md` for the agent. Raw Kane NDJSON per run sits in `.stranger/runs/` (ignored).
+- The loop: the `stranger` skill (`.claude/skills/stranger/`) tells the agent how to act on a verdict. `touch .stranger/armed` arms the Stop hook in `.claude/settings.json`: after watched files change, the agent can't finish until Stranger says CLEAN. `rm .stranger/armed` disarms it. Keep it disarmed while building Stranger itself, or every stop costs two Kane runs.
+- Testing Stranger without Kane credits: point `KANE_CLI_BIN` at a stand-in that prints Kane's agent-mode NDJSON.

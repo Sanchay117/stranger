@@ -5,7 +5,8 @@
   "scripts": {
     "db:apply": "node --env-file=.env scripts/db-apply.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
-    "demo": "npm --prefix demo run dev"
+    "demo": "npm --prefix demo run dev",
+    "stranger": "node stranger/bin/stranger.js run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
