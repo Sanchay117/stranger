@@ -56,39 +56,18 @@ export function apiRequests(sessionDir, limit = 25) {
   return [...out.values()].slice(0, limit)
 }
 
-const NEVER_SEND = new Set(['host', 'content-length', 'connection', 'accept-encoding', 'cookie', 'authorization'])
-
-// Sends each data read again, right after Kane's run while the login token is still valid:
-// once as the stranger (same headers) and once with no login (no Authorization, no cookie).
-// Only GET requests, so nothing in the app changes. Tokens are used here and never written anywhere.
-export async function replayRequests(requests, needle, { timeoutMs = 15_000 } = {}) {
-  const results = []
-  for (const req of requests) {
-    if (req.url.includes(needle)) continue
-    const base = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !NEVER_SEND.has(k)))
-    const login = {}
-    if (req.headers.authorization) login.authorization = req.headers.authorization
-    if (req.headers.cookie) login.cookie = req.headers.cookie
-    const tries = [['stranger', { ...base, ...login }]]
-    if (Object.keys(login).length) tries.push(['anonymous', base])
-    for (const [as, headers] of tries) {
-      const out = { as, method: 'GET', url: req.url, status: null, hit: false }
-      try {
-        const res = await fetch(req.url, { headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
-        out.status = res.status
-        const body = await res.text()
-        if (res.ok && body.includes(needle)) {
-          out.hit = true
-          out.where = as === 'stranger' ? "sent again with the stranger's login" : 'sent again with no login'
-          out.snippet = around(body, needle)
-        }
-      } catch (err) {
-        out.error = err.name === 'TimeoutError' ? 'timed out' : err.cause?.code ?? err.message
-      }
-      results.push(out)
+// The login a session's page used for its data reads (Authorization and cookie headers), so another
+// session's requests can be sent with it. Taken from the last authenticated read in the log.
+export function loginHeaders(sessionDir) {
+  let login = {}
+  for (const req of apiRequests(sessionDir, 1000)) {
+    if (req.headers.authorization || req.headers.cookie) {
+      login = {}
+      if (req.headers.authorization) login.authorization = req.headers.authorization
+      if (req.headers.cookie) login.cookie = req.headers.cookie
     }
   }
-  return results
+  return login
 }
 
 // Every HAR entry in the run's network logs (loose files and inside evidence packs).
@@ -130,7 +109,7 @@ function harHits(where, text, needle) {
   return out
 }
 
-function around(text, needle) {
+export function around(text, needle) {
   const at = text.indexOf(needle)
   return text.slice(Math.max(0, at - 160), at + needle.length + 160).replace(/\s+/g, ' ')
 }

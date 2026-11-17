@@ -20,7 +20,7 @@ Options
   --headed         Show the browser instead of running headless
   --timeout <s>    Per Kane run (default: 420)
 
-Exit codes: 0 CLEAN, 1 LEAK, 2 INCONCLUSIVE, 3 setup error.
+Exit codes: 0 CLEAN, 1 LEAK / TAMPER / OVERLOCKED, 2 INCONCLUSIVE, 3 setup error.
 Needs Kane CLI: npm install -g @testmuai/kane-cli && kane-cli login`
 
 const { values, positionals } = parseArgs({
@@ -96,7 +96,7 @@ const seenSteps = new Set()
 
 const result = await check(cfg, {
   headless: !values.headed,
-  onProgress: ({ phase, event, canary, run, probe, index, total, replay }) => {
+  onProgress: ({ phase, event, canary, run, probe, index, total, replay, api }) => {
     if (phase === 'owner' && canary && total > 1) say(`\n${bold(`Probe ${index + 1}/${total}: ${probe}`)}`)
     if (phase === 'owner' && canary) say(`\n  ${labels.owner} ${dim(canary)}`)
     if (phase === 'stranger' && canary) say(`\n  ${labels.stranger}`)
@@ -108,12 +108,18 @@ const result = await check(cfg, {
       say(`    ${mark} ${dim(String(event.remark ?? `step ${event.step}`).slice(0, 110))}`)
     }
     if (run) say(`    ${dim(`${run.status} in ${run.seconds}s${run.credits != null ? `, ${run.credits} credits` : ''}`)}`)
+    if (phase === 'api') say(`\n  ${dim('API checks: every data read again, as the stranger and with no login, then numeric, tamper and personas')}`)
     if (replay?.length) {
-      say(`\n  ${dim('Sending the stranger\'s data reads again')}`)
       for (const r of replay) {
-        const mark = r.hit ? red('✗') : green('✓')
+        const mark = r.hit ? red('✗') : r.error ? yellow('-') : green('✓')
         say(`    ${mark} ${dim(`${r.as === 'stranger' ? 'stranger\'s login' : 'no login'.padEnd(16)}  GET ${r.url.split('?')[0].slice(0, 70)} -> ${r.status ?? r.error}${r.hit ? ', owner\'s canary in it' : ''}`)}`)
       }
+      const n = api?.numeric
+      if (n) say(`    ${n.ran && n.changed.some((c) => !c.canary) ? red('✗') : n.ran ? green('✓') : yellow('-')} ${dim(n.ran ? `numeric canary: ${n.changed.some((c) => !c.canary) ? `${n.changed.filter((c) => !c.canary).length} of the stranger's totals or counts moved` : n.changed.length ? "only the new row's own text showed up (the read check covers that)" : 'nothing the stranger reads moved'}` : `numeric canary not run: ${n.why}`)}`)
+      const t = api?.tamper
+      if (t) say(`    ${t.ran && (t.edited || t.deleted) ? red('✗') : t.ran ? green('✓') : yellow('-')} ${dim(t.ran ? `tamper: change ${t.edited ? 'went through' : 'blocked'}, delete ${t.deleted ? 'went through' : 'blocked'}` : `tamper not run: ${t.why}`)}`)
+      for (const x of api?.personas ?? []) say(`    ${!x.ran ? yellow('-') : x.ok ? green('✓') : red('✗')} ${dim(x.ran ? `${x.name} (should ${x.expect}): ${x.sees ? 'sees' : 'does not see'} the canary` : `${x.name}: ${x.why}`)}`)
+      for (const note of api?.notes ?? []) say(`    ${yellow('-')} ${dim(note)}`)
     }
   },
 })
@@ -130,11 +136,13 @@ if (values.json) {
       fix: files.fix,
       ownerRun: result.ownerRun?.testUrl ?? null,
       strangerRun: result.strangerRun?.testUrl ?? null,
+      findings: result.findings?.map((f) => f.kind) ?? [],
+      ...(result.coverage ? { coverage: `${result.coverage.probed.length}/${result.coverage.tables.length}` } : {}),
       ...(result.probes.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),
     }) + '\n',
   )
 } else {
-  const paint = (v) => (v === 'LEAK' ? red('LEAK') : v === 'CLEAN' ? green('CLEAN') : yellow('INCONCLUSIVE'))
+  const paint = (v) => (v === 'CLEAN' ? green(v) : v === 'INCONCLUSIVE' ? yellow(v) : red(v))
   if (result.probes.length > 1) {
     say('')
     for (const p of result.probes) say(`  ${paint(p.verdict)}  ${p.probe}`)
@@ -145,4 +153,4 @@ if (values.json) {
   if (files.fix) say(`      Fix brief for your coding agent: ${bold(files.fix)}`)
 }
 
-process.exit(result.verdict === 'CLEAN' ? 0 : result.verdict === 'LEAK' ? 1 : 2)
+process.exit(result.verdict === 'CLEAN' ? 0 : result.verdict === 'INCONCLUSIVE' ? 2 : 1)

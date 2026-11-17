@@ -1,11 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 // Reads a Supabase migrations folder in order and works out which row level security policies
 // each table ends up with, so the fix brief can name the real policies instead of guessing.
 // It only knows what the migrations say: a policy added by hand in the dashboard is invisible here.
 export function readPolicies(dir, table) {
-  const out = { files: 0, rls: null, ownerColumn: null, select: [] }
+  const out = { files: 0, rls: null, ownerColumn: null, select: [], all: [] }
   if (!dir || !table || !existsSync(dir)) return out
   const policies = new Map()
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
@@ -39,11 +41,51 @@ export function readPolicies(dir, table) {
       }
     }
   }
-  for (const p of policies.values()) {
-    if (p.command !== 'select' && p.command !== 'all') continue
-    out.select.push({ ...p, open: isOpen(p.using) })
-  }
+  out.all = [...policies.values()].map((p) => ({ ...p, open: isOpen(p.using) }))
+  out.select = out.all.filter((p) => p.command === 'select' || p.command === 'all')
   return out
+}
+
+// Tables that hold per-user data: a column that references auth.users (Supabase's accounts).
+export function userTables(dir) {
+  if (!dir || !existsSync(dir)) return []
+  const out = new Set()
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    for (const sql of statements(readFileSync(join(dir, file), 'utf8'))) {
+      const m = sql.match(/^create\s+table\s+(?:if\s+not\s+exists\s+)?([^\s(]+)\s*\(([\s\S]*)\)\s*$/i)
+      if (m && /references\s+auth\.users\b/i.test(m[2])) out.add(tableOf(m[1]))
+      const drop = sql.match(/^drop\s+table\s+(?:if\s+exists\s+)?([^\s;]+)/i)
+      if (drop) out.delete(tableOf(drop[1]))
+    }
+  }
+  return [...out]
+}
+
+// The policies as they are in the live database right now (read only: pg_policies and pg_class).
+// Needs the "pg" package where Stranger runs; without it, or on any error, this says why and moves on.
+export async function livePolicies(cfg, tables) {
+  let pg
+  try {
+    const require = createRequire(join(cfg.root, 'package.json'))
+    pg = (await import(pathToFileURL(require.resolve('pg')).href)).default
+  } catch {
+    return { error: 'install "pg" in this project to read the live policies' }
+  }
+  const client = new pg.Client({ connectionString: cfg.databaseUrl, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10_000 })
+  try {
+    await client.connect()
+    const out = {}
+    for (const table of tables) {
+      const rls = await client.query("select c.relrowsecurity as rls_on from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = $1", [table])
+      const { rows } = await client.query("select policyname, cmd, roles::text[] as roles, qual from pg_policies where schemaname = 'public' and tablename = $1 order by policyname", [table])
+      out[table] = { rls: rls.rows[0]?.rls_on ?? null, policies: rows.map((r) => ({ name: r.policyname, command: r.cmd.toLowerCase(), roles: r.roles.join(', '), using: r.qual, open: isOpen(r.qual) })) }
+    }
+    return out
+  } catch (err) {
+    return { error: `could not read the live policies: ${err.message}` }
+  } finally {
+    await client.end().catch(() => {})
+  }
 }
 
 // A read rule is open when it never looks at who is asking: true, or no auth.uid() / auth.jwt() /

@@ -75,11 +75,11 @@ if (fp === state.leakAt) {
   state.nudges[session] = (state.nudges[session] ?? 0) + 1
   save()
   if (state.nudges[session] > MAX_NUDGES) {
-    reply({ systemMessage: `Stranger: still LEAK, and nothing in the watched files changed after ${MAX_NUDGES} reminders. Letting the agent stop so a person can decide: .stranger/report.md` })
+    reply({ systemMessage: `Stranger: still failing, and nothing in the watched files changed after ${MAX_NUDGES} reminders. Letting the agent stop so a person can decide: .stranger/report.md` })
   }
   reply({
     decision: 'block',
-    reason: 'Stranger found a data leak and nothing in the watched files has changed since. Read .stranger/FIX.md and fix it at the database, or tell the user plainly why you cannot.',
+    reason: 'Stranger found a problem and nothing in the watched files has changed since. Read .stranger/FIX.md and fix it at the database, or tell the user plainly why you cannot.',
   })
 }
 
@@ -110,7 +110,7 @@ if (result.verdict === 'CLEAN') {
   reply({ systemMessage: `Stranger: CLEAN. ${result.why} Canary ${result.canary}. ${result.strangerRun ?? ''}`.trim() })
 }
 
-if (result.verdict === 'LEAK') {
+if (['LEAK', 'TAMPER', 'OVERLOCKED'].includes(result.verdict)) {
   state.leakAt = fp
   state.tries[session] = (state.tries[session] ?? 0) + 1
   save()
@@ -120,7 +120,7 @@ if (result.verdict === 'LEAK') {
   } catch {}
   reply({
     decision: 'block',
-    reason: `Stranger ran Kane CLI as a second account and found a data leak. ${result.why}\n\n${brief}\nFix it, apply it, then stop again: this hook re-runs Stranger with a fresh canary.`,
+    reason: `Stranger ran Kane CLI as a second account and found ${{ LEAK: 'a data leak', TAMPER: "that the stranger can change the owner's data", OVERLOCKED: 'that someone who should see the data is locked out' }[result.verdict]}. ${result.why}\n\n${brief}\nFix it, apply it, then stop again: this hook re-runs Stranger with a fresh canary.`,
   })
 }
 
