@@ -2,7 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
-import { searchEvidence, restTables, apiRequests, replayRequests } from './evidence.js'
+import { searchEvidence, restTables, apiRequests, loginHeaders } from './evidence.js'
+import { replayReads, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck } from './api.js'
+import { userTables, livePolicies } from './policies.js'
 
 // The canary and control are random and not secret, so they go into the objective as literal
 // text: Kane's step remarks then quote them, while variables would only show as {{placeholders}}.
@@ -38,7 +40,9 @@ export function summarize(result) {
   }
 }
 
-const RANK = { LEAK: 0, INCONCLUSIVE: 1, CLEAN: 2 }
+// LEAK: someone saw data they shouldn't. TAMPER: the stranger could change or delete the owner's row.
+// OVERLOCKED: someone who should see the owner's data (a teammate persona) can't.
+export const RANK = { LEAK: 0, TAMPER: 1, OVERLOCKED: 2, INCONCLUSIVE: 3, CLEAN: 4 }
 
 // One Stranger check: for each probe, the owner plants a fresh canary, then a second account looks for it.
 // The top-level fields describe the worst probe (LEAK, then INCONCLUSIVE, then CLEAN); "probes" has them all.
@@ -72,6 +76,15 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
           ? `${leaks.length} of ${results.length} probes leaked (${leaks.map((r) => r.probe).join(', ')}). ${head.probe}: ${head.why}`
           : `${head.probe}: ${head.why}`
 
+  // Which tables hold user data (from the migrations) and which of them any page read during the check.
+  const read = [...new Set(results.flatMap((r) => r.tables ?? []))]
+  const all = cfg.database === 'supabase' && cfg.migrations ? userTables(join(cfg.root, cfg.migrations)) : []
+  const coverage = all.length ? { tables: all, probed: all.filter((t) => read.includes(t)), missing: all.filter((t) => !read.includes(t)) } : null
+
+  // With a database URL, the fix brief can also show the policies as they are live, not just as migrated.
+  const broken = [...new Set(results.filter((r) => r.verdict !== 'CLEAN' && r.verdict !== 'INCONCLUSIVE').flatMap((r) => r.tables ?? []))]
+  const live = cfg.databaseUrl && broken.length ? await livePolicies(cfg, broken) : null
+
   const { notStarted, ...headFields } = head
   return {
     id,
@@ -83,11 +96,13 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
     ...headFields,
     why,
     probes: results.map(({ notStarted, ...r }) => r),
+    coverage,
+    live,
   }
 }
 
 function skipped(probe, tag, why) {
-  return { probe: probe.name, canary: `stranger-canary-${tag}`, control: `stranger-control-${tag}`, verdict: 'INCONCLUSIVE', why, ownerRun: null, strangerRun: null, evidence: [], anonymous: [], replay: [], tables: [] }
+  return { probe: probe.name, canary: `stranger-canary-${tag}`, control: `stranger-control-${tag}`, verdict: 'INCONCLUSIVE', why, ownerRun: null, strangerRun: null, evidence: [], anonymous: [], replay: [], tables: [], api: null, findings: [] }
 }
 
 async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgress }) {
@@ -119,7 +134,7 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
     const why = notStarted
       ? `Kane did not start: ${owner.reason ?? 'see the log'}`
       : `Kane could not plant the canary as the owner: ${owner.reason ?? owner.oneLiner ?? 'see the log'}`
-    return { ...base, verdict: 'INCONCLUSIVE', why, ownerRun: owner, strangerRun: null, evidence: [], anonymous: [], replay: [], tables: [], notStarted }
+    return { ...base, verdict: 'INCONCLUSIVE', why, ownerRun: owner, strangerRun: null, evidence: [], anonymous: [], replay: [], tables: [], api: null, findings: [], notStarted }
   }
 
   onProgress({ phase: 'stranger', canary })
@@ -135,27 +150,38 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
     onEvent: (event) => onProgress({ phase: 'stranger', event }),
   })
   const stranger = summarize(strangerResult)
-  // Kane keeps no response bodies for API calls, so the HAR search rarely finds anything. Sending the
-  // stranger's own data reads again shows what the server really hands out, with and without a login.
-  const replay = await replayRequests(apiRequests(stranger.sessionDir), canary)
+  onProgress({ phase: 'stranger-ran', run: stranger })
+  // Kane keeps no response bodies for API calls, so the HAR search rarely finds anything. The API checks
+  // send the pages' data reads again and try writes, to see what the server really allows.
+  onProgress({ phase: 'api', canary })
+  const api = await apiChecks(cfg, owner, stranger, canary)
+  const replay = api.replay
   const evidence = [...searchEvidence(stranger.sessionDir, canary).hits, ...replay.filter((r) => r.hit && r.as === 'stranger')]
   const anonymous = replay.filter((r) => r.hit && r.as === 'anonymous')
-  const tables = restTables(stranger.sessionDir)
-  onProgress({ phase: 'stranger-done', run: stranger, evidence, replay })
+  const tables = [...new Set([...restTables(owner.sessionDir), ...restTables(stranger.sessionDir)])]
+  onProgress({ phase: 'stranger-done', evidence, replay, api })
 
-  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, anonymous, replay, tables }
+  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, anonymous, replay, tables, api }
+  return withApiFindings(cfg, result, readVerdict(cfg, probe, result, strangerResult))
+}
+
+function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evidence, anonymous }, strangerResult) {
   const from = (hits) => (hits[0]?.url ? ` from ${hits[0].url.split('?')[0]}` : '')
   const alsoAnon = anonymous.length ? ' With no login at all, the API returns it too.' : ''
   const replayed = evidence.some((h) => h.as === 'stranger')
+  const onlyOwnerPage = replayed && evidence.every((h) => h.as !== 'stranger' || h.page === 'owner')
 
   if (passed(strangerResult)) {
     if (evidence.length) {
-      return { ...result, verdict: 'LEAK', seen: 'network', why: `The page hid it, but the server sends the owner's canary to the stranger${from(evidence)}.${alsoAnon}` }
+      const why = onlyOwnerPage
+        ? `The stranger's pages looked clean, but a read from the owner's page, sent with the stranger's login, returns the owner's canary${from(evidence)}.`
+        : `The page hid it, but the server sends the owner's canary to the stranger${from(evidence)}.`
+      return { verdict: 'LEAK', seen: 'network', why: why + alsoAnon }
     }
     if (anonymous.length) {
-      return { ...result, verdict: 'LEAK', seen: 'anonymous', why: `The stranger's page was clean, but with no login at all the API returns the owner's canary${from(anonymous)}.` }
+      return { verdict: 'LEAK', seen: 'anonymous', why: `The stranger's page was clean, but with no login at all the API returns the owner's canary${from(anonymous)}.` }
     }
-    return { ...result, verdict: 'CLEAN', why: 'The stranger saw their own data and none of the owner\'s.' }
+    return { verdict: 'CLEAN', why: 'The stranger saw their own data and none of the owner\'s.' }
   }
 
   const failedText = [stranger.failedStep?.remark, stranger.reason, stranger.oneLiner].filter(Boolean).join(' ')
@@ -166,7 +192,6 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
   // A replayed read that returns the canary is proof on its own, even when the page check went wrong.
   if (aboutCanary || replayed || (evidence.length && !aboutControl)) {
     return {
-      ...result,
       verdict: 'LEAK',
       seen: aboutCanary ? 'page' : 'network',
       why: aboutCanary
@@ -175,16 +200,84 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
     }
   }
   if (all.includes(canary) && !aboutControl && stranger.exitCode === 1 && !stranger.failedStep) {
-    return { ...result, verdict: 'LEAK', seen: 'page', why: `Kane reported the owner's canary while signed in as ${cfg.stranger.email}.${alsoAnon}` }
+    return { verdict: 'LEAK', seen: 'page', why: `Kane reported the owner's canary while signed in as ${cfg.stranger.email}.${alsoAnon}` }
   }
   if (anonymous.length) {
-    return { ...result, verdict: 'LEAK', seen: 'anonymous', why: `With no login at all, the API returns the owner's canary${from(anonymous)}.` }
+    return { verdict: 'LEAK', seen: 'anonymous', why: `With no login at all, the API returns the owner's canary${from(anonymous)}.` }
   }
   return {
-    ...result,
     verdict: 'INCONCLUSIVE',
     why: aboutControl
       ? `The stranger could not see their own test record, so the page check means nothing yet. Check "look"${probe.name === 'main' ? '' : ` in the "${probe.name}" probe`} in stranger.config.json.`
       : `Kane stopped before the canary check: ${stranger.reason ?? stranger.oneLiner ?? 'see the log'}`,
   }
+}
+
+// The API checks can turn a clean or inconclusive page check into a finding of their own: they are
+// direct proof from the server. Every problem is also listed in "findings" for the report.
+function withApiFindings(cfg, result, verdict) {
+  const { numeric, tamper, personas } = result.api
+  const findings = []
+  // Only changes the text search can't explain: if the new row's own canary text shows up, the read check covers it.
+  const changed = numeric?.ran ? numeric.changed.filter((c) => !c.canary) : []
+  if (changed.length) {
+    findings.push({
+      kind: 'LEAK',
+      seen: 'aggregate',
+      text: `When only the owner added a row (odd number ${numeric.odd.length ? numeric.odd.join(', ') + ' = 7331' : 'none'}), ${changed.length} of the stranger's reads changed: ${changed.map((c) => c.url.split('?')[0]).join(', ')}. The stranger's data depends on the owner's.`,
+    })
+  }
+  for (const p of personas.filter((x) => x.ran && !x.ok)) {
+    findings.push(
+      p.expect === 'hide'
+        ? { kind: 'LEAK', seen: 'persona', text: `${p.name} (${p.email}) should not see the owner's records, but the API gives them the canary.` }
+        : { kind: 'OVERLOCKED', text: `${p.name} (${p.email}) should see the owner's records, but the API does not give them the canary.` },
+    )
+  }
+  if (tamper?.ran && (tamper.edited || tamper.deleted)) {
+    const what = [tamper.edited && 'change', tamper.deleted && 'delete'].filter(Boolean).join(' and ')
+    findings.push({ kind: 'TAMPER', text: `The stranger could ${what} the owner's row in \`${tamper.table}\`.${tamper.restored === false ? ' Stranger could not put it back.' : ''}` })
+  }
+
+  let out = { ...result, ...verdict, findings }
+  const worst = [...findings].sort((a, b) => RANK[a.kind] - RANK[b.kind])[0]
+  if (worst && RANK[worst.kind] < RANK[out.verdict]) {
+    const rest = findings.filter((f) => f !== worst).map((f) => ' ' + f.text).join('')
+    out = { ...out, verdict: worst.kind, seen: worst.seen ?? out.seen, why: worst.text + rest + (verdict.verdict === 'INCONCLUSIVE' ? '' : ` (Page check: ${verdict.verdict}.)`) }
+  } else if (findings.length) {
+    out.why += ' ' + findings.filter((f) => f.text !== out.why).map((f) => f.text).join(' ')
+  }
+  return out
+}
+
+async function apiChecks(cfg, owner, stranger, canary) {
+  const reads = new Map()
+  for (const [page, run] of [['owner', owner], ['stranger', stranger]]) {
+    for (const r of apiRequests(run.sessionDir)) {
+      const had = reads.get(r.url)
+      reads.set(r.url, had ? { ...had, page: 'both' } : { ...r, page })
+    }
+  }
+  const list = [...reads.values()]
+  const strangerLogin = loginHeaders(stranger.sessionDir)
+  const ownerLogin = loginHeaders(owner.sessionDir)
+  const out = { reads: list.length, replay: await replayReads(list, canary, strangerLogin), numeric: null, tamper: null, personas: [], notes: [] }
+
+  if (!cfg.numeric && !cfg.tamper && !cfg.personas.length) return out
+  const target = supabaseTarget(list)
+  if (!target) {
+    out.notes.push('Tamper, numeric and persona checks need a Supabase API in the logs; none was found.')
+    return out
+  }
+  if (cfg.personas.length) out.personas = await personaCheck(target, cfg.personas, list, canary)
+  if (!cfg.numeric && !cfg.tamper) return out
+  const found = ownerLogin.authorization ? await findCanaryRow(target, list, ownerLogin, canary) : null
+  if (!found) {
+    out.notes.push("Tamper and numeric checks skipped: the owner's canary row could not be read back through the API.")
+    return out
+  }
+  out.row = { table: found.table, field: found.field }
+  if (cfg.numeric && strangerLogin.authorization) out.numeric = await numericCheck(target, found, list, ownerLogin, strangerLogin, canary)
+  if (cfg.tamper && strangerLogin.authorization) out.tamper = await tamperCheck(target, found, ownerLogin, strangerLogin, canary)
+  return out
 }

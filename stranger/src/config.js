@@ -31,6 +31,12 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   cfg.plant ??= 'create a new record in the app (for example an invoice, note, post or message) and type the text into its main free-text field'
   cfg.look ??= 'the main list of records in the app'
   cfg.probes = probesOf(cfg, path)
+  cfg.personas = personasOf(cfg, path)
+  // API checks need PostgREST, so they default to on only for Supabase apps.
+  cfg.tamper ??= cfg.database === 'supabase'
+  cfg.numeric ??= cfg.database === 'supabase'
+  // Optional: a Postgres URL (read only use) so the fix brief can list the live policies too.
+  cfg.databaseUrl = optionalEnv(cfg.databaseUrl)
   cfg.database ??= 'unknown'
   cfg.migrations ??= null
   cfg.timeout ??= 420
@@ -51,6 +57,26 @@ function probesOf(cfg, path) {
     if (typeof p?.plant !== 'string' || typeof p?.look !== 'string') throw new Error(`${path}: probe "${name}" needs "plant" and "look"`)
     return { name, plant: p.plant, look: p.look }
   })
+}
+
+// Extra accounts for the API checks: "see" (a teammate who should see the owner's records)
+// or "hide" (a removed member, or anyone else who should not).
+function personasOf(cfg, path) {
+  if (cfg.personas == null) return []
+  if (!Array.isArray(cfg.personas)) throw new Error(`${path}: "personas" must be a list`)
+  return cfg.personas.map((p, i) => {
+    const name = String(p?.name ?? `persona ${i + 1}`)
+    if (!p?.email || !p?.password) throw new Error(`${path}: persona "${name}" needs email and password`)
+    if (p.expect !== 'see' && p.expect !== 'hide') throw new Error(`${path}: persona "${name}" needs "expect": "see" or "hide"`)
+    return { name, expect: p.expect, email: fromEnv(p.email, `${name}.email`), password: fromEnv(p.password, `${name}.password`) }
+  })
+}
+
+// Like fromEnv, but a missing variable just turns the feature off.
+function optionalEnv(value) {
+  if (typeof value !== 'string') return null
+  const match = value.match(/^\$\{?([A-Z0-9_]+)\}?$/)
+  return match ? process.env[match[1]] || null : value
 }
 
 export const TEMPLATE = {

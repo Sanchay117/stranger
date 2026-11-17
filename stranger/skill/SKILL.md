@@ -24,13 +24,16 @@ It takes a few minutes and prints one JSON line: `verdict`, `why`, `canary`, `re
   - write a new migration (never edit an applied one) that limits the leaking table's SELECT policy to the owner, and check UPDATE and DELETE too. The brief names the open policy from the migrations when it can; with several probes it lists each leaking one, so fix every table it names;
   - apply it with the project's migration command;
   - run Stranger again. It plants a fresh canary every time. Repeat until CLEAN, at most three times, then stop and explain what you found.
+- **TAMPER**: the stranger could change or delete the owner's row. FIX.md lists the UPDATE and DELETE policies; make them owner-only in a new migration, then re-run.
+- **OVERLOCKED**: an account that should see the owner's rows (a teammate persona) can't, usually after a fix that went too far. Add the sharing rule FIX.md suggests rather than reopening the table.
 - **INCONCLUSIVE**: Kane could not finish (login, a wrong `plant` or `look` hint in the config, out of credits). Read the report and fix the setup. Never treat it as clean.
 
 ## Never
 
 - Never "fix" a leak by filtering rows in the page or client code. The data still reaches the browser.
 - Never edit, skip or loosen the check, the canary, or `stranger.config.json` to get a CLEAN.
-- Never say the work is done while the last verdict is LEAK.
+- Never say the work is done while the last verdict is LEAK, TAMPER or OVERLOCKED.
+- When you add a table that holds user data, add a probe for it to `stranger.config.json` (the report's Coverage section lists tables no check reached).
 - Never print the passwords in `.env`.
 
 ## Commit

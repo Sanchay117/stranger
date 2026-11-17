@@ -37,7 +37,7 @@ if (!vars.password?.secret) {
 
 const canary = objective.match(/stranger-canary-[0-9a-f]+(?:-\d+)?/)[0]
 const control = objective.match(/stranger-control-[0-9a-f]+(?:-\d+)?/)?.[0]
-const probe = Number(canary.match(/-(\d+)$/)?.[1] ?? 1)
+const probe = Number(canary.match(/^stranger-canary-[0-9a-f]{6}-(\d+)$/)?.[1] ?? 1)
 const modes = (process.env.FAKE_KANE_MODES ?? 'clean').split(',')
 const mode = modes[probe - 1] ?? modes[0]
 const role = name.startsWith('stranger-owner-') ? 'owner' : 'stranger'
@@ -64,10 +64,12 @@ function pack(entries) {
 // Like real Kane 0.10.4: the request is logged in full (headers, bearer token), the response body
 // is not. Only "network-leak" keeps a body, to cover a Kane that someday does.
 const API = process.env.FAKE_KANE_API ?? 'http://127.0.0.1:9'
-const api = (rows) => ({
+// FAKE_KANE_STRANGER_TABLE: the table the stranger's page reads (default invoices).
+// FAKE_KANE_TOTALS=1: the stranger's page also reads /rest/v1/totals (a count, for the numeric canary).
+const read = (table, rows) => ({
   request: {
     method: 'GET',
-    url: `${API}/rest/v1/invoices?select=*&order=created_at.desc`,
+    url: `${API}/rest/v1/${table}?select=*&order=created_at.desc`,
     headers: [
       { name: 'apikey', value: 'public-anon-key' },
       { name: 'Authorization', value: `Bearer tok-${role}` },
@@ -76,6 +78,12 @@ const api = (rows) => ({
   },
   response: { status: 200, content: mode === 'network-leak' ? { text: JSON.stringify(rows) } : { size: -1 } },
 })
+const api = (rows) => {
+  if (role === 'owner') return [read('invoices', rows)]
+  const out = [read(process.env.FAKE_KANE_STRANGER_TABLE || 'invoices', rows)]
+  if (process.env.FAKE_KANE_TOTALS) out.push(read('totals', []))
+  return out
+}
 
 const steps = [
   { step: 1, status: 'done', remark: `navigate: ${flag('--url')}` },
@@ -91,7 +99,7 @@ function end(status, extra, code) {
 
 if (role === 'owner') {
   appendFileSync(join(out, 'planted.txt'), `${canary}\n`)
-  pack([api([{ note: canary }])])
+  pack(api([{ note: canary }]))
   if (mode === 'owner-fail') {
     emit({ step: 4, status: 'failed', remark: 'click: New invoice button not found' })
     end('failed', { one_liner: 'could not find New invoice', reason: 'New invoice button not found' }, 1)
@@ -103,23 +111,23 @@ if (role === 'owner') {
 const own = { note: control }
 const theirs = { note: canary }
 if (mode === 'page-leak') {
-  pack([api([own, theirs])])
+  pack(api([own, theirs]))
   emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
   emit({ step: 6, status: 'failed', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
   end('failed', { one_liner: 'The final check failed because the canary text was present.', reason: 'canary visible' }, 1)
 }
 if (mode === 'network-leak') {
-  pack([api([own, theirs])])
+  pack(api([own, theirs]))
   emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
   emit({ step: 6, status: 'done', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
   end('passed', { one_liner: 'the stranger saw only their own invoice' }, 0)
 }
 if (mode === 'control-missing') {
-  pack([api([])])
+  pack(api([]))
   emit({ step: 5, status: 'failed', remark: `assert: the text "${control}" is visible on the page` })
   end('failed', { one_liner: 'own invoice not listed', reason: 'control not visible' }, 1)
 }
-pack([api([own])])
+pack(api([own]))
 emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
 emit({ step: 6, status: 'done', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
 end('passed', { one_liner: 'the stranger saw only their own invoice' }, 0)

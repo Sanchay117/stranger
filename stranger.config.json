@@ -6,5 +6,6 @@
   "look": "the Your invoices list on the main page",
   "database": "supabase",
   "migrations": "supabase/migrations",
+  "databaseUrl": "$SUPABASE_DB_URL",
   "watch": ["supabase/migrations", "demo/src"]
 }
