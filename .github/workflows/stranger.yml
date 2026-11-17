@@ -1,0 +1,123 @@
+# Stranger as a pull request gate. When Vercel finishes a preview deploy for a pull request labelled
+# "stranger", this runs Stranger against the preview, comments the verdict and Kane's run link on the
+# pull request, and fails the check on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend
+# Kane credits (about 50 per run).
+#
+# Repository secrets: LT_USERNAME, LT_ACCESS_KEY (TestMu AI / LambdaTest), OWNER_EMAIL, OWNER_PASSWORD,
+# STRANGER_EMAIL, STRANGER_PASSWORD. Optional: SUPABASE_DB_URL (live policies in the fix brief),
+# VERCEL_AUTOMATION_BYPASS_SECRET (if previews are behind Vercel's login).
+# Repository variables (optional): STRANGER_PATH, the app's path on the preview (Duebook: /duebook/),
+# KANE_PROJECT_ID and KANE_FOLDER_ID (skip Kane's project picker).
+name: Stranger
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  deployments: read
+  pull-requests: write
+
+jobs:
+  stranger:
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Find the labelled pull request for this deploy
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.deployment.sha,
+            })
+            const pr = data.find((p) => p.state === 'open' && p.labels.some((l) => l.name === 'stranger'))
+            core.setOutput('number', pr ? String(pr.number) : '')
+            if (!pr) core.notice('No open pull request labelled "stranger" for this deploy, so Stranger did not run.')
+
+      - uses: actions/checkout@v4
+        if: steps.pr.outputs.number != ''
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - uses: actions/setup-node@v4
+        if: steps.pr.outputs.number != ''
+        with:
+          node-version: 24
+
+      - name: Install and log in to Kane CLI
+        if: steps.pr.outputs.number != ''
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          KANE_PROJECT_ID: ${{ vars.KANE_PROJECT_ID }}
+          KANE_FOLDER_ID: ${{ vars.KANE_FOLDER_ID }}
+        run: |
+          npm install -g @testmuai/kane-cli
+          npm install --no-audit --no-fund
+          args=(--username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY")
+          [ -n "$KANE_PROJECT_ID" ] && args+=(--project-id "$KANE_PROJECT_ID")
+          [ -n "$KANE_FOLDER_ID" ] && args+=(--folder-id "$KANE_FOLDER_ID")
+          kane-cli login "${args[@]}"
+          kane-cli whoami
+
+      - name: Run Stranger on the preview
+        id: run
+        if: steps.pr.outputs.number != ''
+        env:
+          PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+          STRANGER_PATH: ${{ vars.STRANGER_PATH }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+          OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+          STRANGER_EMAIL: ${{ secrets.STRANGER_EMAIL }}
+          STRANGER_PASSWORD: ${{ secrets.STRANGER_PASSWORD }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          url="${PREVIEW_URL%/}${STRANGER_PATH:-/}"
+          if [ -n "$BYPASS" ]; then
+            sep='?'; [[ "$url" == *\?* ]] && sep='&'
+            url="${url}${sep}x-vercel-protection-bypass=${BYPASS}&x-vercel-set-bypass-cookie=true"
+          fi
+          set +e
+          node stranger/bin/stranger.js run --json --url "$url" > stranger.json
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          cat stranger.json
+
+      - name: Comment the verdict on the pull request
+        if: steps.pr.outputs.number != '' && always()
+        uses: actions/github-script@v7
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+        with:
+          script: |
+            const fs = require('fs')
+            const scrub = (t) => (process.env.BYPASS ? t.split(process.env.BYPASS).join('***') : t)
+            let result = null
+            try { result = JSON.parse(fs.readFileSync('stranger.json', 'utf8').trim().split('\n').at(-1)) } catch {}
+            let report = ''
+            try { report = fs.readFileSync('.stranger/report.md', 'utf8') } catch {}
+            const icon = { CLEAN: '✅', LEAK: '🚨', TAMPER: '🚨', OVERLOCKED: '⚠️', INCONCLUSIVE: '❔' }
+            const head = result
+              ? `${icon[result.verdict] ?? ''} **Stranger: ${result.verdict}** on ${process.env.PREVIEW_URL}\n\n${result.why}\n\n` +
+                (result.strangerRun ? `[Kane run](${result.strangerRun})` : '')
+              : '❔ **Stranger could not run.** See the workflow log.'
+            const body = scrub(`<!-- stranger -->\n${head}\n\n<details><summary>Full report</summary>\n\n${report}\n</details>`)
+            const issue = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR) }
+            const comments = await github.paginate(github.rest.issues.listComments, issue)
+            const mine = comments.find((c) => c.body?.startsWith('<!-- stranger -->'))
+            if (mine) await github.rest.issues.updateComment({ ...issue, comment_id: mine.id, body })
+            else await github.rest.issues.createComment({ ...issue, body })
+
+      - name: Fail on a finding
+        if: steps.pr.outputs.number != '' && steps.run.outputs.code != '0'
+        run: |
+          echo "Stranger exit code ${{ steps.run.outputs.code }} (1 = LEAK, TAMPER or OVERLOCKED; 2 = INCONCLUSIVE; 3 = setup error)"
+          exit 1
