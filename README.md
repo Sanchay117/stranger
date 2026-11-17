@@ -31,6 +31,8 @@ AI app builders often ship a database rule that lets every account read every ro
 
 Every run uses a fresh canary, so old data can't fake a pass. The numeric, tamper and persona checks speak Supabase's API (PostgREST); the read replay works for any app.
 
+**Blast radius.** Stranger counts the rows and accounts visible in the GET replies it already checks, with the stranger's login and with none. The report lists counts and sensitive column names. The app's filters and reply limits still apply. Set `"blast": false` to turn it off.
+
 ## Try it in 30 seconds
 
 Duebook is a small invoicing app we built with the leak left in **on purpose**, so Stranger has something to catch.
@@ -95,6 +97,7 @@ A check takes about 4 minutes and about 50 Kane credits (two Kane runs).
 | `probes` | Optional. A list of `{ "name", "plant", "look" }`, one per kind of private record (invoices, notes, messages). Each probe costs two Kane runs. If any probe leaks, the check is LEAK. |
 | `database` | `supabase`, `firebase` or `unknown`. Picks the fix advice, and turns on the numeric and tamper checks for `supabase`. |
 | `tamper`, `numeric` | Turn those checks off with `false`. On by default for Supabase. |
+| `blast` | Show counts from existing REST read replies. On by default. |
 | `personas` | Optional. A list of `{ "name", "email", "password", "expect": "see" or "hide" }`: extra accounts that should (a teammate) or should not (a removed member) see the owner's records. Signed in through Supabase's API, so no Kane credits. |
 | `databaseUrl` | Optional, for example `$SUPABASE_DB_URL`. If set (and the `pg` package is installed), the fix brief also lists the policies as they are live in the database and marks any that are not in your migrations. Read only. |
 | `migrations` | Your migrations folder. For Supabase, the fix brief reads it and names the exact policy that lets everyone in. |

@@ -21,6 +21,7 @@ Entry for the Kane CLI Online Hackathon (TestMu AI): build a working web app wit
 - 17 Nov 15:30 IST: first real runs from the second machine (Ashank's TestMu account). 40c24b INCONCLUSIVE (`.env` still pointed at localhost), then cf7845 LEAK on the live Duebook (about 53 credits): page check caught it, the new fix brief named `"Enable read access for all users"` from 0001. The network search found nothing, because Kane's HAR has no response bodies (see Kane notes).
 - 17 Nov 16:00 IST: request replay built and run live: 23f429 LEAK (about 64 credits). Page check, stranger replay and no-login replay all found Maya's canary; no token in the tracked `.stranger/` files. Nothing committed yet.
 - 17 Nov 16:50 IST: built the rest of the "next level" list on branch `replay-and-probes` (first part pushed as b7cf9bf): owner-page reads replayed as the stranger, numeric canary, tamper check (TAMPER verdict), personas (OVERLOCKED verdict), coverage of user-data tables, live policies via `databaseUrl` (+ `pg`), PR gate workflow. 22 offline tests. Live run 6541c9: LEAK (page, replay, no login), tamper blocked on the live DB, numeric row added and removed, coverage 1/1, live policies listed. About 53 credits. Duebook has no teams, so personas are tested only offline. PR gate not run yet (needs repo secrets).
+- 17 Nov: added blast radius counts from the existing API replay replies on the `blast-radius` branch. The counts cover the rows those queries returned.
 
 ## How this entry is judged (short)
 Three gates, then four equal scores (Ships, Verified, Closed loop, Craft). Full detail in `HACKATHON.md`.
@@ -66,7 +67,7 @@ Learned from real runs (16 Nov, Kane 0.10.4):
 - `.github/workflows/stranger.yml`: PR gate on Vercel preview deploys of PRs labelled `stranger`. Not yet run: needs the repo secrets listed at its top.
 - `supabase/migrations/`: database schema and policies, applied in order. A data-leak fix is always a new migration here, never a client-side filter.
 - `scripts/`: apply migrations, seed demo users and invoices (needs `.env`), export a run as the page's replay.
-- `stranger/`: the Stranger CLI that drives Kane. `src/api.js` holds the API checks run after Kane (read replay from both pages, numeric canary, tamper, personas); `src/policies.js` reads migrations, user tables and (with `databaseUrl` and `pg`) live policies. The repo root `package.json` is its package (`bin`, `files`), so `npx github:Sanchay117/stranger <command>` installs only `stranger/`. Keep runtime code dependency-free; `pg` and `supabase-js` are devDependencies for `scripts/`.
+- `stranger/`: the Stranger CLI that drives Kane. `src/api.js` holds the API checks run after Kane (read replay from both pages, `blastRadius` counts, numeric canary, tamper, personas); `src/policies.js` reads migrations, user tables and (with `databaseUrl` and `pg`) live policies. The repo root `package.json` is its package (`bin`, `files`), so `npx github:Sanchay117/stranger <command>` installs only `stranger/`. Keep runtime code dependency-free; `pg` and `supabase-js` are devDependencies for `scripts/`.
 - `.claude/`: the Stranger skill and the opt-in Stop hook for this repo (the closed loop). `stranger install-claude` copies the same pair into another project (`.claude/hooks/stranger-stop.js`, which falls back to npx).
 
 ## Stack and commands

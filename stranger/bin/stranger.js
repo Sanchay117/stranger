@@ -3,7 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
-import { writeReport } from '../src/report.js'
+import { blastRows, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
@@ -121,6 +121,21 @@ const result = await check(cfg, {
       for (const x of api?.personas ?? []) say(`    ${!x.ran ? yellow('-') : x.ok ? green('✓') : red('✗')} ${dim(x.ran ? `${x.name} (should ${x.expect}): ${x.sees ? 'sees' : 'does not see'} the canary` : `${x.name}: ${x.why}`)}`)
       for (const note of api?.notes ?? []) say(`    ${yellow('-')} ${dim(note)}`)
     }
+    if (api?.blast?.length) {
+      say(`\n  ${bold('Blast radius')}`)
+      const width = Math.max(...api.blast.map(({ table }) => table.length))
+      const indent = ' '.repeat(width + 6)
+      for (const { table, stranger, anonymous, sensitive } of api.blast) {
+        const exposed = stranger?.othersRows > 0 || anonymous?.othersRows > 0
+        const paint = exposed ? red : dim
+        say(paint(`    ${table.padEnd(width)}  stranger reads ${blastRows(stranger, true)}`))
+        say(paint(`${indent}with no login ${blastRows(anonymous)}`))
+        if (exposed && sensitive.length) {
+          const more = sensitive.length > 3 ? ` (+${sensitive.length - 3} more)` : ''
+          say(paint(`${indent}exposed: ${sensitive.slice(0, 3).join(', ')}${more}`))
+        }
+      }
+    }
   },
 })
 
@@ -138,6 +153,7 @@ if (values.json) {
       strangerRun: result.strangerRun?.testUrl ?? null,
       findings: result.findings?.map((f) => f.kind) ?? [],
       ...(result.coverage ? { coverage: `${result.coverage.probed.length}/${result.coverage.tables.length}` } : {}),
+      ...(result.blast?.length ? { blast: result.blast.map(({ table, stranger, anonymous, sensitive }) => ({ table, stranger, anonymous, sensitive })) } : {}),
       ...(result.probes.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),
     }) + '\n',
   )

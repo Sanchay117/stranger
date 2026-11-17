@@ -21,6 +21,7 @@ It takes a few minutes and prints one JSON line: `verdict`, `why`, `canary`, `re
 
 - **CLEAN**: say so, with the canary id and the Kane run link. Do not claim more than this check covers.
 - **LEAK**: read `.stranger/FIX.md` and `.stranger/report.md`. If the brief says **No login needed**, anyone on the internet can read the rows, so say that plainly to the user. Fix it where the data lives:
+  - The FIX.md impact line shows how much the sampled reads exposed. Confirm the measured blast radius drops to zero when you re-run the check.
   - write a new migration (never edit an applied one) that limits the leaking table's SELECT policy to the owner, and check UPDATE and DELETE too. The brief names the open policy from the migrations when it can; with several probes it lists each leaking one, so fix every table it names;
   - apply it with the project's migration command;
   - run Stranger again. It plants a fresh canary every time. Repeat until CLEAN, at most three times, then stop and explain what you found.

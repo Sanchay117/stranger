@@ -63,6 +63,18 @@ const HINTS = {
 
 export const FAILING = new Set(['LEAK', 'TAMPER', 'OVERLOCKED'])
 
+const hasExposedRows = (entry) => entry.stranger?.othersRows > 0 || entry.anonymous?.othersRows > 0
+const plural = (count, noun, capped = false) => `${count}${capped ? '+' : ''} ${noun}${count === 1 && !capped ? '' : 's'}`
+
+export function blastRows(counts, withAccounts = false) {
+  if (!counts) return 'unavailable'
+  const { rows, othersRows, accounts, capped } = counts
+  if (othersRows == null) return `${plural(rows, 'row')} returned, ownership unknown`
+  if (othersRows === 0) return capped ? 'none observed in the sample' : 'none'
+  const shown = plural(othersRows, 'row', capped)
+  return withAccounts && accounts != null ? `${shown} from ${plural(accounts, 'other account', capped)}` : shown
+}
+
 export function writeReport(cfg, result) {
   const dir = join(cfg.root, '.stranger')
   mkdirSync(dir, { recursive: true })
@@ -84,6 +96,7 @@ export function writeReport(cfg, result) {
       credits: (result.probes?.length ? result.probes : [result]).reduce((sum, p) => sum + (p.ownerRun?.credits ?? 0) + (p.strangerRun?.credits ?? 0), 0),
       ...(result.probes?.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),
       ...(result.findings?.length ? { findings: [...new Set(result.findings.map((f) => f.seen ? `${f.kind}:${f.seen}` : f.kind))] } : {}),
+      ...(result.blast?.length ? { blast: result.blast.map(({ table, stranger, anonymous }) => ({ table, stranger, anonymous })) } : {}),
     }) + '\n',
   )
   writeFileSync(reportPath, tidy(report(cfg, result)))
@@ -164,6 +177,18 @@ function apiLines(p, multi) {
       '',
     )
   }
+  if (a.blast?.length) {
+    lines.push(
+      head('Blast radius'),
+      "Counts come from the existing GET replays with the stranger's login and with none. The original queries still apply. No row values are stored.",
+      '',
+      ...a.blast.map((entry) => {
+        const columns = hasExposedRows(entry) && entry.sensitive.length ? ` Returned sensitive columns: ${entry.sensitive.map((name) => `\`${name}\``).join(', ')}.` : ''
+        return `- \`${entry.table}\`: stranger reads ${blastRows(entry.stranger, true)}. With no login: ${blastRows(entry.anonymous)}.${columns}`
+      }),
+      '',
+    )
+  }
   if (a.notes?.length) lines.push(...a.notes.map((x) => `> ${x}`), '')
   return lines
 }
@@ -219,6 +244,7 @@ function fix(cfg, r) {
   const aggregate = failing.some((p) => p.findings?.some((f) => f.seen === 'aggregate'))
   const persona = failing.some((p) => p.findings?.some((f) => f.seen === 'persona'))
   const known = [...new Set(failing.map(tableOf))].filter(Boolean)
+  const impacts = (r.blast ?? []).filter((entry) => hasExposedRows(entry) && (!known.length || known.includes(entry.table)))
 
   const found = (p) => {
     const where = [...(p.evidence ?? []), ...(p.anonymous ?? [])].find((h) => h.url)?.url
@@ -275,6 +301,7 @@ function fix(cfg, r) {
   return [
     `# ${TITLES[r.verdict] ?? 'Stranger found a problem'}`,
     '',
+    ...(impacts.length ? [`Impact: ${impacts.map(({ table, stranger, anonymous }) => `\`${table}\`: stranger reads ${blastRows(stranger, true)} (${blastRows(anonymous)} with no login)`).join('. ')}.`, ''] : []),
     `Owner: **${r.owner}**. Stranger: **${r.stranger}**.`,
     '',
     ...(multi ? [`${failing.length} of ${r.probes.length} probes failed.`, ''] : []),
