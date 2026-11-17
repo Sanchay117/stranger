@@ -112,7 +112,7 @@ Done means: stranger run prints CLEAN.</code></pre>
     <ul role="tabpanel" id="tab-checks" aria-labelledby="t-checks">
       <li><b>The owner plants a canary.</b> Kane signs in as your real first account and saves a random string like <code>stranger-canary-afb57e</code>.</li>
       <li><b>A second account looks for it.</b> Kane signs in as someone else, saves its own control, and checks the control is there, so an empty page can't pass.</li>
-      <li><b>Any sight of the canary is a leak.</b> On the page, or in a response in Kane's network log.</li>
+      <li><b>Any sight of the canary is a leak.</b> On the page, or in what the server sends: Stranger replays the stranger's own data requests, then again with no login at all.</li>
       <li><b>New canary every run.</b> Old data can't fake a pass, and a fix has to really hold.</li>
     </ul>
     <ul role="tabpanel" id="tab-agent" aria-labelledby="t-agent" hidden>
