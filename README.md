@@ -6,8 +6,11 @@ Stranger uses [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) to si
 
 Built for the Kane CLI Online Hackathon (TestMu AI).
 
+- **Demo video (2:47):** https://youtu.be/ItX3Ibe9veI
 - **Live page:** https://stranger-2yf3.vercel.app
 - **See the leak yourself (one click, no sign-up):** https://stranger-2yf3.vercel.app/duebook/?as=stranger
+
+[![Stranger demo video: Kane CLI signs in as a stranger and finds another user's invoice](film/thumbnail.jpg)](https://youtu.be/ItX3Ibe9veI)
 
 ## Why
 
