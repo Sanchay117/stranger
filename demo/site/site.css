@@ -20,11 +20,52 @@
   --text: 'Figtree', ui-sans-serif, system-ui, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /* Surfaces that change with the theme. */
+  --on-accent: #141a2e;
+  --frost: rgb(255 255 255 / .55);
+  --frost-low: rgb(255 255 255 / .2);
+  --frost-edge: rgb(255 255 255 / .9);
+  --frost-edge-low: rgb(255 255 255 / .3);
+  --shadow: 20 26 46;
+  --quiet: #ffffff;
+  --code: #121828;
+  --code-edge: transparent;
+  --accent-a: #d97706;
+  --accent-b: #e5484d;
+  --accent-c: #f08a24;
+  --theme-color: #f3f1ec;
+
   --radius-pill: 999px;
   --radius-l: 22px;
   --radius-xl: 30px;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-spring: cubic-bezier(.34, 1.4, .64, 1);
+}
+
+/* Dark: a deep navy night with the same canary family glowing on it. */
+:root[data-theme="dark"] {
+  --ink: #eceef5;
+  --ink-soft: #a9aec2;
+  --ink-faint: #737a92;
+  --ground: #0b0f1d;
+  --ground-deep: #161c31;
+  --card: #121829;
+  --line: #252c44;
+  --leak: #ef5a5f;
+  --clean: #34b384;
+
+  --frost: rgb(26 32 56 / .78);
+  --frost-low: rgb(14 18 34 / .62);
+  --frost-edge: rgb(255 255 255 / .14);
+  --frost-edge-low: rgb(255 255 255 / .04);
+  --shadow: 0 0 0;
+  --quiet: #182036;
+  --code: #0f1424;
+  --code-edge: rgb(255 255 255 / .07);
+  --accent-a: #ffb020;
+  --accent-b: #ff6b6b;
+  --accent-c: #ffcf33;
+  --theme-color: #0b0f1d;
 }
 
 * { box-sizing: border-box; }
@@ -55,6 +96,7 @@ code { font-family: var(--mono); font-size: .88em; }
 .nav nav { display: flex; gap: 22px; font-size: 15px; color: var(--ink-soft); }
 .nav nav a { text-decoration: none; }
 .nav nav a:hover { color: var(--ink); }
+.nav-end { display: flex; align-items: center; gap: 22px; }
 
 /* Hero */
 /* The blob can reach past the hero's bottom edge. The last 120px fade out (only blob lives there),
@@ -68,7 +110,7 @@ code { font-family: var(--mono); font-size: .88em; }
 .eyebrow {
   display: inline-flex; gap: 6px; align-items: center; margin-bottom: 26px;
   padding: 7px 14px; border-radius: var(--radius-pill); border: 1px solid var(--line);
-  background: rgb(255 255 255 / .55); color: var(--ink-soft); font-size: 14px; text-decoration: none;
+  background: var(--frost); color: var(--ink-soft); font-size: 14px; text-decoration: none;
 }
 .eyebrow:hover { color: var(--ink); border-color: var(--ink-faint); }
 h1 {
@@ -77,7 +119,7 @@ h1 {
 }
 h1 .accent {
   display: block;
-  background: linear-gradient(90deg, #d97706, #e5484d, #f08a24, #d97706) 0 50% / 300% 100%;
+  background: linear-gradient(90deg, var(--accent-a), var(--accent-b), var(--accent-c), var(--accent-a)) 0 50% / 300% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: sheen 9s linear infinite alternate;
 }
@@ -92,14 +134,14 @@ h1 .accent {
 .blob.fallback { background: radial-gradient(closest-side, var(--canary), var(--amber) 55%, transparent); border-radius: 50%; opacity: .85; }
 
 .glass {
-  background: linear-gradient(180deg, rgb(255 255 255 / .55), rgb(255 255 255 / .2));
+  background: linear-gradient(180deg, var(--frost), var(--frost-low));
   backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .9), inset 0 -1px 0 rgb(255 255 255 / .3),
-              0 24px 60px -24px rgb(20 26 46 / .35), 0 2px 6px rgb(20 26 46 / .06);
+  box-shadow: inset 0 1px 0 var(--frost-edge), inset 0 -1px 0 var(--frost-edge-low),
+              0 24px 60px -24px rgb(var(--shadow) / .35), 0 2px 6px rgb(var(--shadow) / .06);
 }
 
 .composer { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 22px; border-radius: var(--radius-pill); transition: box-shadow .25s; }
-.composer:focus-within { box-shadow: inset 0 1px 0 rgb(255 255 255 / .95), 0 0 0 4px rgb(255 162 31 / .25), 0 24px 60px -24px rgb(20 26 46 / .35); }
+.composer:focus-within { box-shadow: inset 0 1px 0 var(--frost-edge), 0 0 0 4px rgb(255 162 31 / .25), 0 24px 60px -24px rgb(var(--shadow) / .35); }
 .scheme { color: var(--ink-faint); font-size: 17px; }
 .composer input {
   flex: 1; min-width: 0; border: 0; background: none; outline: none;
@@ -108,7 +150,7 @@ h1 .accent {
 .composer input::placeholder { color: var(--ink-faint); }
 .go {
   flex: none; border: 0; cursor: pointer; border-radius: var(--radius-pill);
-  padding: 13px 22px; font-family: inherit; font-size: 16px; font-weight: 600; color: var(--ink);
+  padding: 13px 22px; font-family: inherit; font-size: 16px; font-weight: 600; color: var(--on-accent);
   background: linear-gradient(135deg, var(--canary), var(--amber) 45%, var(--coral));
   box-shadow: 0 8px 20px -10px rgb(255 94 87 / .7);
   transition: transform .3s var(--ease-spring), box-shadow .3s;
@@ -126,6 +168,11 @@ h1 .accent {
 
 .try { margin-top: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; min-height: 92px; }
 .try-label { font-size: 13px; color: var(--ink-soft); letter-spacing: .02em; }
+/* At night the label sits on the bright blob, so it gets a little dark backing to stay readable. */
+:root[data-theme="dark"] .try-label { padding: 2px 10px; border-radius: 99px; background: rgb(11 15 29 / .6); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+:root[data-theme="dark"] .scheme { color: var(--ink-soft); }
+/* The lede can cross the top of the blob; a soft night halo keeps it legible there. */
+:root[data-theme="dark"] .lede { color: #c3c8d9; text-shadow: 0 0 14px rgb(11 15 29 / .95), 0 1px 3px rgb(11 15 29 / .9); }
 .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 .chip {
   padding: 9px 16px; border-radius: var(--radius-pill); border: 0; cursor: pointer;
@@ -141,8 +188,8 @@ h1 .accent {
 /* Console: the replay of a real run, or the config for your own app */
 .console {
   position: relative; max-width: 760px; margin: 28px auto 0; text-align: left;
-  background: #121828; color: #d8dbe6; border-radius: var(--radius-l);
-  box-shadow: 0 30px 70px -30px rgb(20 26 46 / .6);
+  background: var(--code); color: #d8dbe6; border-radius: var(--radius-l);
+  box-shadow: 0 0 0 1px var(--code-edge), 0 30px 70px -30px rgb(var(--shadow) / .6);
   font-family: var(--mono); font-size: 13.5px; line-height: 1.7;
   animation: open .5s var(--ease-out);
 }
@@ -177,7 +224,7 @@ h1 .accent {
   background: rgb(255 255 255 / .1); color: #fff; transition: background .2s;
 }
 .console-actions a:hover, .console-actions button:hover { background: rgb(255 255 255 / .18); }
-.console-actions .primary { background: linear-gradient(135deg, var(--canary), var(--amber) 45%, var(--coral)); color: var(--ink); }
+.console-actions .primary { background: linear-gradient(135deg, var(--canary), var(--amber) 45%, var(--coral)); color: var(--on-accent); }
 .console-note { padding: 0 18px 16px; font-family: var(--text); font-size: 13px; color: #8f95aa; }
 .cfg { color: #e7e9f1; font-size: 13px; }
 .cfg .s { color: #ffd479; }
@@ -195,8 +242,9 @@ section h2 {
 .proof, .how { padding: 72px 16px; }
 .proof-grid { max-width: 1060px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 .shot { margin: 0; }
-.shot-frame { position: relative; border-radius: var(--radius-l); overflow: hidden; border: 1px solid var(--line); background: #faf7f2; box-shadow: 0 30px 60px -36px rgb(20 26 46 / .45); }
+.shot-frame { position: relative; border-radius: var(--radius-l); overflow: hidden; border: 1px solid var(--line); background: #faf7f2; box-shadow: 0 30px 60px -36px rgb(var(--shadow) / .45); }
 .shot-frame img { display: block; width: 100%; height: auto; }
+:root[data-theme="dark"] .shot-frame img { filter: brightness(.9) contrast(1.02); }
 .mark { position: absolute; left: 4.4%; width: 89%; border-radius: 12px; pointer-events: none; }
 .mark::after {
   position: absolute; left: 50%; translate: -50% 0; top: -11px; padding: 2px 9px; border-radius: 99px;
@@ -220,8 +268,8 @@ section h2 {
 .btn { display: inline-block; text-decoration: none; border-radius: var(--radius-pill); padding: 11px 18px; font-weight: 600; font-size: 15px; transition: transform .25s var(--ease-spring); }
 .btn:hover { transform: translateY(-1px); }
 .btn-ink { background: var(--ink); color: var(--ground); }
-.btn-quiet { border: 1px solid var(--line); background: #fff; }
-.brief { margin: 0 0 12px; padding: 16px; border-radius: 14px; background: #121828; color: #d8dbe6; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; }
+.btn-quiet { border: 1px solid var(--line); background: var(--quiet); }
+.brief { margin: 0 0 12px; padding: 16px; border-radius: 14px; background: var(--code); box-shadow: 0 0 0 1px var(--code-edge); color: #d8dbe6; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; }
 .brief .c { color: #7d8399; }
 .brief .k { color: #ffb86b; }
 .link { font-weight: 600; text-decoration: none; border-bottom: 1px solid var(--line); }
@@ -253,6 +301,7 @@ section h2 {
 
 @media (max-width: 760px) {
   .nav nav a:not(:last-child) { display: none; }
+  .nav-end { gap: 14px; }
   .hero { padding: 104px 16px 150px; }
   .lede { font-size: 16px; margin-bottom: 36px; }
   .composer { flex-wrap: wrap; border-radius: var(--radius-l); padding: 8px; }

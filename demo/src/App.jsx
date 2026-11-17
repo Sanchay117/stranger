@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { bindSwitch } from '../site/theme.js'
 import { supabase, configured } from './supabase'
 
 const money = (cents, currency = 'USD') =>
@@ -9,10 +10,29 @@ const day = (iso) =>
 
 function Banner() {
   return (
-    <div className="banner" role="note">
-      Demo app with a security bug left in on purpose, so Stranger has something to catch. Please don't enter real details.{' '}
-      <a href="/">What is Stranger?</a>
+    <div className="banner">
+      <p role="note">
+        Demo app with a security bug left in on purpose, so Stranger has something to catch. Please don't enter real details.{' '}
+        <a href="/">What is Stranger?</a>
+      </p>
+      <ThemeSwitch />
     </div>
+  )
+}
+
+// The same switch as the Stranger page (site/theme.js and theme.css); one choice covers both.
+function ThemeSwitch() {
+  const ref = useRef(null)
+  useEffect(() => bindSwitch(ref.current), [])
+  return (
+    <button ref={ref} className="theme-switch" type="button" role="switch" aria-checked="false" aria-label="Dark mode" data-theme-switch>
+      <span className="ts-stars" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="ts-knob" aria-hidden="true" />
+    </button>
   )
 }
 
