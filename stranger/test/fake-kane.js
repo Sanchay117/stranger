@@ -66,20 +66,23 @@ function pack(entries) {
 const API = process.env.FAKE_KANE_API ?? 'http://127.0.0.1:9'
 // FAKE_KANE_STRANGER_TABLE: the table the stranger's page reads (default invoices).
 // FAKE_KANE_TOTALS=1: the stranger's page also reads /rest/v1/totals (a count, for the numeric canary).
+// FAKE_KANE_FILTERED=1: only the stranger's page logs a read, filtered to that account.
+const filtered = process.env.FAKE_KANE_FILTERED === '1'
+const token = `test.${Buffer.from(JSON.stringify({ sub: role })).toString('base64url')}.signature`
 const read = (table, rows) => ({
   request: {
     method: 'GET',
-    url: `${API}/rest/v1/${table}?select=*&order=created_at.desc`,
+    url: `${API}/rest/v1/${table}?select=*&order=created_at.desc${filtered ? '&user_id=eq.stranger' : ''}`,
     headers: [
       { name: 'apikey', value: 'public-anon-key' },
-      { name: 'Authorization', value: `Bearer tok-${role}` },
+      { name: 'Authorization', value: `Bearer ${token}` },
       { name: 'Accept-Profile', value: 'public' },
     ],
   },
   response: { status: 200, content: mode === 'network-leak' ? { text: JSON.stringify(rows) } : { size: -1 } },
 })
 const api = (rows) => {
-  if (role === 'owner') return [read('invoices', rows)]
+  if (role === 'owner') return filtered ? [] : [read('invoices', rows)]
   const out = [read(process.env.FAKE_KANE_STRANGER_TABLE || 'invoices', rows)]
   if (process.env.FAKE_KANE_TOTALS) out.push(read('totals', []))
   return out
@@ -109,7 +112,7 @@ if (role === 'owner') {
 }
 
 const own = { note: control }
-const theirs = { note: canary }
+const theirs = { note: canary, client_name: 'Synthetic HAR Client' }
 if (mode === 'page-leak') {
   pack(api([own, theirs]))
   emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })

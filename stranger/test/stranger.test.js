@@ -16,6 +16,7 @@ const BIN = join(here, '..', 'bin', 'stranger.js')
 const HOOK = join(here, '..', 'hooks', 'claude-stop.js')
 const FAKE = join(here, 'fake-kane.js')
 const PASSWORD = 'not-a-real-password-7731'
+const token = (user) => `test.${Buffer.from(JSON.stringify({ sub: user })).toString('base64url')}.signature`
 
 const LEAKY = readFileSync(join(repo, 'supabase', 'migrations', '0001_invoices.sql'), 'utf8')
 const FIXED = `drop policy if exists "Enable read access for all users" on public.invoices;
@@ -24,7 +25,7 @@ create policy "Users can read their own invoices"
   using ((select auth.uid()) = user_id);`
 
 // A throwaway project with a config, two accounts and the Duebook migrations.
-function project({ probes, personas, migrations = [['0001_invoices.sql', LEAKY]] } = {}) {
+function project({ probes, personas, migrations = [['0001_invoices.sql', LEAKY]], options } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'stranger-test-'))
   mkdirSync(join(root, 'migrations'))
   for (const [name, sql] of migrations) writeFileSync(join(root, 'migrations', name), sql)
@@ -39,6 +40,7 @@ function project({ probes, personas, migrations = [['0001_invoices.sql', LEAKY]]
     watch: ['migrations'],
     ...(probes ? { probes } : {}),
     ...(personas ? { personas } : {}),
+    ...options,
   }
   writeFileSync(join(root, 'stranger.config.json'), JSON.stringify(config, null, 2))
   const kane = join(root, 'kane-out')
@@ -76,16 +78,17 @@ before(async () => {
     for await (const chunk of req) body += chunk
     const auth = req.headers.authorization ?? null
     const url = new URL(req.url, 'http://x')
-    api.seen.push({ method: req.method, auth, apikey: req.headers.apikey ?? null, path: url.pathname, body })
+    api.seen.push({ method: req.method, auth, apikey: req.headers.apikey ?? null, path: url.pathname, query: url.search, prefer: req.headers.prefer ?? null, body })
     sync()
-    const json = (status, data) => res.writeHead(status, { 'content-type': 'application/json' }).end(data === undefined ? '' : JSON.stringify(data))
+    const json = (status, data, headers = {}) => res.writeHead(status, { 'content-type': 'application/json', ...headers }).end(data === undefined ? '' : JSON.stringify(data))
 
     if (url.pathname === '/auth/v1/token') {
       const { email, password } = JSON.parse(body || '{}')
       const a = api.accounts[email]
-      return a && a.password === password ? json(200, { access_token: `tok-${a.user}` }) : json(400, { error: 'invalid_grant' })
+      return a && a.password === password ? json(200, { access_token: token(a.user) }) : json(400, { error: 'invalid_grant' })
     }
-    const who = auth?.startsWith('Bearer tok-') ? auth.slice('Bearer tok-'.length) : null
+    const payload = auth?.match(/^Bearer test\.([A-Za-z0-9_-]+)\.signature$/)?.[1]
+    const who = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).sub : null
     if (auth && !who) return json(401, { message: 'bad token' })
     if (!who && api.anon === 'refuse') return json(401, { message: 'no' })
     const table = url.pathname.match(/^\/rest\/v1\/(\w+)/)?.[1]
@@ -96,8 +99,15 @@ before(async () => {
     }
     if (table !== 'invoices') return json(200, [])
     const id = url.searchParams.get('id')?.replace(/^eq\./, '')
-    const match = (r) => id == null || String(r.id) === id
-    if (req.method === 'GET') return json(200, api.rows.filter((r) => match(r) && canRead(r)))
+    const owner = url.searchParams.get('user_id')?.replace(/^eq\./, '')
+    const match = (r) => (id == null || String(r.id) === id) && (owner == null || r.user_id === owner)
+    if (req.method === 'GET') {
+      const rows = api.rows.filter((r) => match(r) && canRead(r))
+      const page = rows.slice(0, api.responseLimit)
+      const exact = req.headers.prefer === 'count=exact' || api.exactCount
+      const range = `${page.length ? `0-${page.length - 1}` : '*'}/${exact ? rows.length : '*'}`
+      return json(200, page, { 'Content-Range': range })
+    }
     if (!who) return json(401, { message: 'no' })
     const writable = api.rows.filter((r) => match(r) && (api.write === 'all' || r.user_id === who))
     if (req.method === 'POST') {
@@ -122,8 +132,9 @@ before(async () => {
 })
 after(() => server.close())
 
-function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {} } = {}) {
-  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, rows: [], synced: new Set(), nextId: 1, seen: [] })
+function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {}, rows = [], responseLimit = Infinity, exactCount = false } = {}) {
+  const seeded = rows.map((row, i) => ({ amount_cents: 100, id: i + 1, ...row }))
+  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, exactCount, responseLimit, rows: seeded, synced: new Set(), nextId: seeded.length + 1, seen: [] })
 }
 
 const env = (p, modes, extra = {}) => ({ ...process.env, ...extra, KANE_CLI_BIN: FAKE, FAKE_KANE_DIR: p.kane, FAKE_KANE_MODES: modes, FAKE_KANE_FORBID: PASSWORD, FAKE_KANE_API: API })
@@ -141,14 +152,14 @@ function spawnAsync(args, opts) {
   })
 }
 
-async function run(p, modes, extra) {
+async function run(p, modes, extra, json = true) {
   if (api.dir !== p.kane) setApi(p)
-  const r = await spawnAsync([BIN, 'run', '--json'], { cwd: p.root, env: env(p, modes, extra) })
+  const r = await spawnAsync([BIN, 'run', ...(json ? ['--json'] : [])], { cwd: p.root, env: env(p, modes, extra) })
   let out = null
   try {
     out = JSON.parse(r.stdout.trim().split('\n').at(-1))
   } catch {}
-  return { code: r.status, out, stderr: r.stderr, read: (f) => readFileSync(join(p.root, '.stranger', f), 'utf8') }
+  return { code: r.status, out, stdout: r.stdout, stderr: r.stderr, read: (f) => readFileSync(join(p.root, '.stranger', f), 'utf8') }
 }
 
 const calls = (p) => (existsSync(join(p.kane, 'calls.log')) ? readFileSync(join(p.kane, 'calls.log'), 'utf8').trim().split('\n') : [])
@@ -196,7 +207,8 @@ test('LEAK on the network: a Kane that keeps response bodies is searched too', a
   assert.match(fix, /How it showed up: in what the server sent the stranger/)
   assert.match(fix, /\(table `invoices`\)/)
   // Kane's own log quotes the canary in the objective; only the HAR may count.
-  assert.doesNotMatch(r.read('report.md'), /kane\.log/)
+  assert.doesNotMatch(r.read('report.md'), /kane\.log|Synthetic HAR Client/)
+  assert.doesNotMatch(r.read('last.json'), /Synthetic HAR Client/)
 })
 
 test('CLEAN: exit 0, and a stale fix brief is removed', async () => {
@@ -343,14 +355,111 @@ test('replay: a locked-down API stays CLEAN, and every check leaves the owner\'s
   const anon = api.seen.filter((x) => !x.auth && x.path.startsWith('/rest/'))
   assert.ok(anon.length > 0 && anon.every((x) => x.method === 'GET' && x.apikey === 'public-anon-key'))
   // The stranger only ever tries writes on the owner's canary row (the tamper check).
-  const strangerWrites = api.seen.filter((x) => x.auth === 'Bearer tok-stranger' && x.method !== 'GET')
+  const strangerWrites = api.seen.filter((x) => x.auth === `Bearer ${token('stranger')}` && x.method !== 'GET')
   assert.deepEqual(strangerWrites.map((x) => x.method), ['PATCH', 'DELETE'])
   // The canary row is untouched and the numeric canary's extra row is gone.
   const mine = api.rows.filter((x) => x.user_id === 'owner')
   assert.deepEqual(mine.map((x) => x.note), [r.out.canary])
   assert.match(r.read('report.md'), /## Numeric canary[\s\S]*Nothing the stranger reads changed/)
   assert.match(r.read('report.md'), /Change `note`: blocked[\s\S]*Delete: blocked/)
-  for (const f of ['report.md', 'history.jsonl', 'last.json']) assert.doesNotMatch(r.read(f), /tok-stranger|tok-owner/)
+  for (const f of ['report.md', 'history.jsonl', 'last.json']) {
+    for (const user of ['owner', 'stranger']) assert.ok(!r.read(f).includes(token(user)))
+  }
+})
+
+function rowsFor() {
+  // The fake owner adds the eighth row when it plants the canary.
+  return ['account-a', 'account-a', 'account-b', 'account-b', 'owner', 'stranger', 'stranger'].map((user_id) => ({
+    user_id,
+    client_name: 'Synthetic Replay Client',
+    client_email: 'synthetic-replay-client@invalid.test',
+    note: 'Synthetic replay note',
+  }))
+}
+
+const blastProject = (blast) => project({ options: { numeric: false, tamper: false, blast } })
+const invoiceCounts = (r) => r.out.blast.find(({ table }) => table === 'invoices')
+
+test('blast radius: counts six rows across three other accounts and keeps row values private', async () => {
+  const p = blastProject()
+  setApi(p, { stranger: 'all', rows: rowsFor() })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'LEAK', r.stderr)
+  const blast = invoiceCounts(r)
+  assert.deepEqual(blast.stranger, { rows: 8, othersRows: 6, accounts: 3, capped: false })
+  assert.equal(blast.anonymous, null)
+  assert.deepEqual(blast.sensitive, ['amount_cents', 'client_email', 'note'])
+  assert.match(r.read('report.md'), /## Blast radius[\s\S]*stranger reads 6 rows from 3 other accounts/)
+  assert.match(r.read('FIX.md'), /^Impact: .*6 rows from 3 other accounts/m)
+  const history = JSON.parse(r.read('history.jsonl'))
+  assert.deepEqual(history.blast, [{ table: 'invoices', stranger: blast.stranger, anonymous: null }])
+  for (const output of [r.stdout, r.read('report.md'), r.read('FIX.md'), r.read('history.jsonl'), r.read('last.json')]) {
+    assert.doesNotMatch(output, /Synthetic Replay Client|synthetic-replay-client@invalid\.test/)
+  }
+})
+
+test('blast radius: a clean run reports none and tracks the count dropping to zero', async () => {
+  const p = blastProject()
+  setApi(p, { stranger: 'all', rows: rowsFor() })
+  await run(p, 'clean')
+  setApi(p, { rows: rowsFor() })
+  const r = await run(p, 'clean', {}, false)
+  assert.equal(r.code, 0, r.stderr)
+  assert.match(r.stderr, /Blast radius[\s\S]*invoices\s+stranger reads none/)
+  const history = r.read('history.jsonl').trim().split('\n').map(JSON.parse)
+  assert.deepEqual(history.map((entry) => entry.blast[0].stranger.othersRows), [6, 0])
+})
+
+test('blast radius: every row returned without a login counts', async () => {
+  const p = blastProject()
+  setApi(p, { anon: 'all', rows: rowsFor() })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'LEAK')
+  assert.deepEqual(invoiceCounts(r).anonymous, { rows: 8, othersRows: 8, accounts: 4, capped: false })
+})
+
+test('blast radius: keeps captured filters even when the stand-in policy is open', async () => {
+  const p = blastProject()
+  setApi(p, { stranger: 'all', rows: rowsFor() })
+  const r = await run(p, 'clean', { FAKE_KANE_FILTERED: '1' })
+  assert.equal(r.out.verdict, 'CLEAN')
+  assert.equal(invoiceCounts(r).stranger.othersRows, 0)
+  assert.equal(api.seen.length, 2)
+  assert.ok(api.seen.every(({ method, query }) => method === 'GET' && query.includes('user_id=eq.stranger')))
+})
+
+test('blast radius: disabling it omits the counts and uses the same requests', async () => {
+  const enabled = blastProject()
+  const disabled = blastProject(false)
+  setApi(enabled, { stranger: 'all', rows: rowsFor() })
+  await run(enabled, 'clean')
+  const requests = api.seen
+  setApi(disabled, { stranger: 'all', rows: rowsFor() })
+  const r = await run(disabled, 'clean')
+  assert.equal(r.out.verdict, 'LEAK')
+  assert.equal(Object.hasOwn(r.out, 'blast'), false)
+  assert.equal(Object.hasOwn(JSON.parse(r.read('history.jsonl')), 'blast'), false)
+  assert.doesNotMatch(r.read('report.md'), /Blast radius/)
+  assert.deepEqual(api.seen, requests)
+})
+
+test('blast radius: caps the sample and uses an exact total when the response provides one', async () => {
+  const p = blastProject()
+  const settings = {
+    stranger: 'all',
+    anon: 'all',
+    rows: Array.from({ length: 1498 }, () => ({ user_id: 'account-a' })),
+    responseLimit: 1000,
+    exactCount: true,
+  }
+  setApi(p, settings)
+  const r = await run(p, 'page-leak')
+  assert.deepEqual(invoiceCounts(r).stranger, { rows: 1500, othersRows: 1000, accounts: 1, capped: true })
+  assert.ok(api.seen.every(({ prefer }) => prefer === null))
+  setApi(p, settings)
+  const human = await run(p, 'page-leak', {}, false)
+  assert.match(human.stderr, /stranger reads 1000\+ rows/)
+  assert.match(human.stderr, /with no login 1000\+ rows/)
 })
 
 test('replay: proof from the server wins even when the page check went wrong', async () => {
