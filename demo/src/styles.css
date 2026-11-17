@@ -9,10 +9,40 @@
   --paid: #2b8a3e;
   --unpaid: #b35c00;
   --overdue: #c92a2a;
+  --field: #ffffff;
+  --banner-bg: #fff4e6;
+  --banner-line: #ffd8a8;
+  --banner-ink: #7a3e00;
+  --paid-bg: #ebfbee;
+  --unpaid-bg: #fff4e6;
+  --overdue-bg: #fff5f5;
+  --theme-color: #faf7f2;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--ink);
   background: var(--bg);
   line-height: 1.45;
+}
+
+/* Dark: warm charcoal, so Duebook keeps its paper-and-ink feel at night. */
+:root[data-theme="dark"] {
+  --bg: #15120e;
+  --card: #1f1b16;
+  --ink: #f2ede5;
+  --muted: #a89f92;
+  --line: #342e26;
+  --accent: #ff7a2e;
+  --accent-ink: #1a0f05;
+  --paid: #63d27b;
+  --unpaid: #ffab52;
+  --overdue: #ff7070;
+  --field: #191612;
+  --banner-bg: #2a1d0f;
+  --banner-line: #4a3115;
+  --banner-ink: #ffc58a;
+  --paid-bg: rgb(99 210 123 / .12);
+  --unpaid-bg: rgb(255 171 82 / .12);
+  --overdue-bg: rgb(255 112 112 / .12);
+  --theme-color: #15120e;
 }
 
 * { box-sizing: border-box; }
@@ -20,13 +50,16 @@ body { margin: 0; background: var(--bg); }
 button, input, textarea { font: inherit; color: inherit; }
 
 .banner {
-  background: #fff4e6;
-  border-bottom: 1px solid #ffd8a8;
-  color: #7a3e00;
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  background: var(--banner-bg);
+  border-bottom: 1px solid var(--banner-line);
+  color: var(--banner-ink);
   font-size: 0.85rem;
-  padding: 8px 16px;
+  padding: 6px 12px 6px 16px;
   text-align: center;
 }
+.banner p { margin: 0; flex: 1; }
+.banner .theme-switch { --ts-w: 50px; --ts-h: 28px; }
 .banner a { color: inherit; font-weight: 600; }
 
 .logo { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; margin: 0; color: var(--accent); }
@@ -47,7 +80,7 @@ button, input, textarea { font: inherit; color: inherit; }
 form.card { display: flex; flex-direction: column; gap: 12px; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; font-weight: 600; }
 input, textarea {
-  font-weight: 400; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  font-weight: 400; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
 }
 input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 
@@ -79,7 +112,7 @@ h2 { font-size: 1rem; margin: 24px 0 8px; }
 .amount { font-weight: 700; font-variant-numeric: tabular-nums; }
 .note { margin: 0; font-size: 0.9rem; background: var(--bg); border-radius: 8px; padding: 8px 10px; }
 .pill { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 99px; }
-.pill.paid { background: #ebfbee; color: var(--paid); }
-.pill.unpaid { background: #fff4e6; color: var(--unpaid); }
-.pill.overdue { background: #fff5f5; color: var(--overdue); }
+.pill.paid { background: var(--paid-bg); color: var(--paid); }
+.pill.unpaid { background: var(--unpaid-bg); color: var(--unpaid); }
+.pill.overdue { background: var(--overdue-bg); color: var(--overdue); }
 .empty { padding: 24px 0; }

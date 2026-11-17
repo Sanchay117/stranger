@@ -1,5 +1,8 @@
 // The Stranger landing page: the living blob, the composer, the replay of a real Kane run, and the tabs.
 import replay from './replay-afb57e.json'
+import { initTheme } from './theme.js'
+
+initTheme()
 
 const REPO = 'https://github.com/Sanchay117/stranger'
 const NPX = 'npx github:Sanchay117/stranger'
@@ -22,7 +25,7 @@ const esc = (s) =>
   const vert = 'attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }'
   const frag = `
     precision highp float;
-    uniform vec2 uRes; uniform float uTime; uniform vec2 uMouse;
+    uniform vec2 uRes; uniform float uTime; uniform vec2 uMouse; uniform float uDim;
     uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec3 c4;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float noise(vec2 p) {
@@ -52,6 +55,7 @@ const esc = (s) =>
       float spec = pow(max(0.0, dot(reflect(-L, n), vec3(0.0, 0.0, 1.0))), 22.0) * 0.3;
       col = col * diff + spec;
       col = mix(col, vec3(1.0), smoothstep(0.75, 1.0, h) * 0.18);
+      col *= uDim;
       gl_FragColor = vec4(col * inside, inside);
     }`
 
@@ -126,11 +130,15 @@ const esc = (s) =>
       gl.uniform2f(u('uRes'), canvas.width, canvas.height)
       gl.uniform1f(u('uTime'), still ? 8 : (now - start) / 1000)
       gl.uniform2f(u('uMouse'), mouse[0], mouse[1])
+      // A little softer at night, so it glows instead of glaring.
+      gl.uniform1f(u('uDim'), document.documentElement.dataset.theme === 'dark' ? 0.86 : 1)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     }
     if (!still) requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)
+  // With reduced motion it draws once, so draw again when the theme changes.
+  if (still) new MutationObserver(() => requestAnimationFrame(frame)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })(document.getElementById('blob'))
 
 // ---------- What to look for ----------
