@@ -1,13 +1,13 @@
 # Stranger found a data leak
 
-Signed in as **stranger@duebook.demo**, Kane could see a record that only **maya@duebook.demo** created.
+Owner: **maya@duebook.demo**. Stranger: **stranger@duebook.demo**.
 
-- Canary the owner planted: `stranger-canary-23f429`
+- Canary the owner planted: `stranger-canary-6541c9`
 - How it showed up: on the page
 - **No login needed:** the API returned it to a request with no login (only the public key), so anyone on the internet can read these rows.
 - Response that carried it: https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/invoices (table `invoices`)
-- Kane's failing check: assert: the text "stranger-canary-23f429" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MFWH7C0FS3TCNEHBB5QN25/dashboard/share/US_9UY0RSVTOXAYM76EZI26DOISI1SOWZOWN1VSPK906181SH8U5FL8MACE4YPE2HRC?type=summary&agentView=true&fqdn=summary-page
+- Kane's failing check: assert: the text "stranger-canary-6541c9" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MHJE5WGRK8K5XFDJCW2MNV/dashboard/share/US_51GRF5CKCP9UZQ07964RHK0DTEAF9K8AOTYHPHTQ7WE66F5ZT63Z9T74Z2KVF4BJ?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
@@ -28,6 +28,13 @@ create policy "Owners can read their own rows" on public.invoices
 ```
 
 Write it as a new migration in `supabase/migrations/` (never edit an applied one), apply it, and check UPDATE and DELETE policies on the same table too.
+
+Live in the database right now (row level security on):
+
+- `"Enable read access for all users"` for select to public: `using (true)` **open to everyone**
+- `"Users can delete their own invoices"` for delete to authenticated: `using ((( SELECT auth.uid() AS uid) = user_id))`
+- `"Users can insert their own invoices"` for insert to authenticated: `using ()`
+- `"Users can update their own invoices"` for update to authenticated: `using ((( SELECT auth.uid() AS uid) = user_id))`
 
 Do not fix this by filtering rows in the page or the client code. The data still reaches the browser, and anyone can call the API directly.
 
