@@ -17,14 +17,19 @@ AI app builders often ship a database rule that lets every account read every ro
 
 1. **The owner plants a canary.** Kane signs in as your first test account and saves a random string, like `stranger-canary-afb57e`, into a record.
 2. **A stranger looks for it.** Kane signs in as a second account. It saves its own control string and checks it can see that, so an empty or broken page can never pass. Then it checks the owner's canary is nowhere on the page.
-3. **Verdict.**
-   - **LEAK**: the stranger saw the canary on the page, or the server sent it to them (see step 4), so a page that hides the data still fails.
-   - **CLEAN**: the stranger saw their own data and none of the owner's.
+3. **API checks, in seconds, with no extra Kane credits.** Kane logs every request both browsers made (with their logins), but not the answers. Stranger uses that log to ask the server directly:
+   - **Reads.** Every data read from *both* pages is sent again with the stranger's login, then with **no login at all**. This catches data the page hides, tables only the owner's page reads, and data anyone on the internet can read.
+   - **Numeric canary.** The owner adds a second row with an odd number (7331) in every numeric column. If anything the stranger reads changes, such as a total or a count, the owner's data is leaking into it, even though no text shows up. The row is removed afterwards.
+   - **Tamper.** The stranger tries to change, then delete, the owner's canary row. The owner reads it back after each try and puts it back if needed.
+   - **Personas** (optional). More test accounts: a teammate who *should* see the owner's rows, a removed member who should not. A fix that locks the teammate out fails too.
+4. **Verdict.**
+   - **LEAK**: someone saw the owner's data: on the page, in what the server sends, with no login, through a total or count, or as a persona who should not.
+   - **TAMPER**: the stranger could change or delete the owner's record.
+   - **OVERLOCKED**: someone who should see the owner's data (a teammate persona) can't.
+   - **CLEAN**: none of the above.
    - **INCONCLUSIVE**: Kane could not finish (login failed, a wrong hint in the config, no credits). Never treated as clean.
 
-4. **What the server really sends.** Kane logs every request the stranger's browser made, but not the answers. So right after Kane finishes, Stranger sends the stranger's own data requests again (GET only, nothing changes) and looks for the canary in the answer. Then it sends them once more **with no login at all**, which catches data that anyone on the internet can read.
-
-Every run uses a fresh canary, so old data can't fake a pass.
+Every run uses a fresh canary, so old data can't fake a pass. The numeric, tamper and persona checks speak Supabase's API (PostgREST); the read replay works for any app.
 
 ## Try it in 30 seconds
 
@@ -88,18 +93,21 @@ A check takes about 4 minutes and about 50 Kane credits (two Kane runs).
 | `plant` | In plain English: how to create a record and where to type the canary. Example: `click New invoice and type the text into the Note field`. |
 | `look` | Where a user sees their own records. Example: `the Your invoices list`. |
 | `probes` | Optional. A list of `{ "name", "plant", "look" }`, one per kind of private record (invoices, notes, messages). Each probe costs two Kane runs. If any probe leaks, the check is LEAK. |
-| `database` | `supabase`, `firebase` or `unknown`. Picks the fix advice. |
+| `database` | `supabase`, `firebase` or `unknown`. Picks the fix advice, and turns on the numeric and tamper checks for `supabase`. |
+| `tamper`, `numeric` | Turn those checks off with `false`. On by default for Supabase. |
+| `personas` | Optional. A list of `{ "name", "email", "password", "expect": "see" or "hide" }`: extra accounts that should (a teammate) or should not (a removed member) see the owner's records. Signed in through Supabase's API, so no Kane credits. |
+| `databaseUrl` | Optional, for example `$SUPABASE_DB_URL`. If set (and the `pg` package is installed), the fix brief also lists the policies as they are live in the database and marks any that are not in your migrations. Read only. |
 | `migrations` | Your migrations folder. For Supabase, the fix brief reads it and names the exact policy that lets everyone in. |
 | `watch` | Folders the Claude Code hook watches for changes. |
 | `timeout` | Seconds per Kane run (default 420). |
 
 ### What you get
 
-- `.stranger/report.md`: what happened, with Kane's run links and every replayed request (with the stranger's login and with none) and what came back.
-- `.stranger/FIX.md` (on a LEAK): a brief for your coding agent. For Supabase it lists the table's read policies from your migrations, marks the open one, and gives the exact SQL to replace it.
+- `.stranger/report.md`: what happened, with Kane's run links, every request sent again and what came back, the numeric, tamper and persona results, and **coverage**: which of your user-data tables (from the migrations) the check actually reached, and which it did not.
+- `.stranger/FIX.md` (on LEAK, TAMPER or OVERLOCKED): a brief for your coding agent. For Supabase it lists the table's policies from your migrations (and live, with `databaseUrl`), marks the open one, and gives the exact SQL to fix reads, writes, aggregates or shared access.
 - `.stranger/history.jsonl`: one line per run, worth committing as proof.
 
-Exit codes: `0` CLEAN, `1` LEAK, `2` INCONCLUSIVE, `3` setup error. Add `--json` for one machine-readable line, `--headed` to watch the browser.
+Exit codes: `0` CLEAN, `1` LEAK, TAMPER or OVERLOCKED, `2` INCONCLUSIVE, `3` setup error. Add `--json` for one machine-readable line, `--headed` to watch the browser.
 
 ## Let your coding agent fix it (Claude Code)
 
@@ -110,15 +118,22 @@ touch .stranger/armed
 
 This adds a Stranger skill and a Stop hook. While `.stranger/armed` exists and watched files changed, the agent can't finish until Stranger says CLEAN. On a LEAK the hook hands it the fix brief. It lets go after 3 failed checks, or after 2 reminders where the agent changed nothing (for example when it explains why it shouldn't touch the database), so it never traps the agent. `rm .stranger/armed` turns it off.
 
+## Gate pull requests (GitHub + Vercel)
+
+`.github/workflows/stranger.yml` runs Stranger on each Vercel preview deploy of a pull request labelled `stranger`, comments the verdict and Kane's run link on the pull request, and fails the check on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend Kane credits.
+
+It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / LambdaTest login, for `kane-cli login`) and the four `OWNER_*` / `STRANGER_*` values, plus the variable `STRANGER_PATH` if the app is not at the root of the preview (Duebook: `/duebook/`). If previews sit behind Vercel's login, add `VERCEL_AUTOMATION_BYPASS_SECRET`.
+
 ## What it does not check
 
 Be honest about the edges:
 
-- It checks **reading** only: not whether a stranger can edit or delete someone else's records.
-- It sees only what the probes visit. A leaking table with no probe is not caught.
-- It needs a canary it can type. Leaks through totals, counts or files are not caught yet.
+- It sees only what the pages read. A table no page touches is not caught, but the coverage list in the report names it.
+- The numeric canary flags any change in what the stranger reads while only the owner acted. A page that legitimately shows everyone's totals (a public counter) will be flagged; set `"numeric": false` for it.
+- Files in storage buckets are not checked yet.
 - The replay sends only the data requests the stranger's page made, with the login token Kane captured. It runs right after Kane, while that token is still valid; it never sends anything that changes data, and it never writes the token down.
-- The fix brief reads your migrations, not the live database. Policies added by hand in the dashboard are not listed.
+- Without `databaseUrl`, the fix brief reads only your migrations, so policies added by hand in the dashboard are not listed.
+- The tamper and numeric checks write to your app's database, as your own test accounts, on Stranger's own canary rows only, and undo every change. Point Stranger at a test or demo project, not production.
 
 ## Develop
 
@@ -126,7 +141,7 @@ Be honest about the edges:
 npm test
 ```
 
-Runs Stranger end to end against a stand-in Kane (`stranger/test/fake-kane.js`): page leaks, leaks only the server shows (found by replaying requests against a stand-in API), logged-out leaks, clean runs, inconclusive runs, several probes and the Stop hook. No Kane credits.
+Runs Stranger end to end against a stand-in Kane (`stranger/test/fake-kane.js`): page leaks, leaks only the server shows, owner-page reads, logged-out leaks, the numeric canary, tamper, personas, coverage, clean and inconclusive runs, several probes and the Stop hook, against a stand-in Supabase with switchable security rules. No Kane credits.
 
 ```bash
 cd demo && npm install && npm run dev
@@ -136,7 +151,8 @@ The product page at `/` and Duebook at `/duebook/`, on port 5231. Duebook needs 
 
 | Folder | What is in it |
 | --- | --- |
-| `stranger/` | The CLI, the Claude Code skill and Stop hook, and tests. No runtime dependencies. |
+| `stranger/` | The CLI, the Claude Code skill and Stop hook, and tests. No runtime dependencies (`pg` is used only if installed, for live policies). |
+| `.github/workflows/` | The pull request gate. |
 | `demo/` | The product page and Duebook (React + Supabase). |
 | `supabase/migrations/` | Duebook's schema, including the leaky read policy. |
 | `scripts/` | Apply migrations, seed demo data, reset the live leak, export a run for the page. |
