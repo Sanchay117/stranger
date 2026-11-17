@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
 import { searchEvidence, restTables, apiRequests, loginHeaders } from './evidence.js'
-import { replayReads, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck } from './api.js'
+import { replayReads, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck } from './api.js'
 import { userTables, livePolicies } from './policies.js'
 
 // The canary and control are random and not secret, so they go into the objective as literal
@@ -84,6 +84,7 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
   // With a database URL, the fix brief can also show the policies as they are live, not just as migrated.
   const broken = [...new Set(results.filter((r) => r.verdict !== 'CLEAN' && r.verdict !== 'INCONCLUSIVE').flatMap((r) => r.tables ?? []))]
   const live = cfg.databaseUrl && broken.length ? await livePolicies(cfg, broken) : null
+  const blast = results.flatMap((r) => r.api?.blast ?? [])
 
   const { notStarted, ...headFields } = head
   return {
@@ -95,6 +96,7 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
     stranger: cfg.stranger.email,
     ...headFields,
     why,
+    ...(blast.length ? { blast: mergeBlastRadius(blast) } : {}),
     probes: results.map(({ notStarted, ...r }) => r),
     coverage,
     live,
@@ -261,7 +263,21 @@ async function apiChecks(cfg, owner, stranger, canary) {
   const list = [...reads.values()]
   const strangerLogin = loginHeaders(stranger.sessionDir)
   const ownerLogin = loginHeaders(owner.sessionDir)
-  const out = { reads: list.length, replay: await replayReads(list, canary, strangerLogin), numeric: null, tamper: null, personas: [], notes: [] }
+  const notes = []
+  let blast
+  const observe = cfg.blast === false ? undefined : (...args) => {
+    if (notes.length) return
+    try {
+      blast ??= blastRadius(cfg, strangerLogin)
+      blast.observe(...args)
+    } catch {
+      blast = null
+      notes.push('Blast radius could not count the replay responses.')
+    }
+  }
+  const replay = await replayReads(list, canary, strangerLogin, observe)
+  const out = { reads: list.length, replay, numeric: null, tamper: null, personas: [], notes }
+  if (blast) out.blast = blast.entries()
 
   if (!cfg.numeric && !cfg.tamper && !cfg.personas.length) return out
   const target = supabaseTarget(list)

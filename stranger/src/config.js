@@ -35,6 +35,7 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   // API checks need PostgREST, so they default to on only for Supabase apps.
   cfg.tamper ??= cfg.database === 'supabase'
   cfg.numeric ??= cfg.database === 'supabase'
+  cfg.blast ??= true
   // Optional: a Postgres URL (read only use) so the fix brief can list the live policies too.
   cfg.databaseUrl = optionalEnv(cfg.databaseUrl)
   cfg.database ??= 'unknown'

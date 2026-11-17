@@ -94,7 +94,7 @@ function harHits(where, text, needle) {
   try {
     har = JSON.parse(text)
   } catch {
-    return [{ where, url: null, snippet: around(text, needle) }]
+    return [{ where, url: null, snippet: needle }]
   }
   const seen = new Set()
   const out = []
@@ -104,14 +104,9 @@ function harHits(where, text, needle) {
     const url = entry.request?.url ?? null
     if (seen.has(url)) continue
     seen.add(url)
-    out.push({ where, url, method: entry.request?.method ?? null, status: entry.response?.status ?? null, snippet: around(body, needle) })
+    out.push({ where, url, method: entry.request?.method ?? null, status: entry.response?.status ?? null, snippet: needle })
   }
   return out
-}
-
-export function around(text, needle) {
-  const at = text.indexOf(needle)
-  return text.slice(Math.max(0, at - 160), at + needle.length + 160).replace(/\s+/g, ' ')
 }
 
 function* walk(dir, depth) {
