@@ -29,11 +29,71 @@ export function searchEvidence(sessionDir, needle) {
   return { searched, hits }
 }
 
-// Supabase REST tables the page read during the run (from request URLs, which Kane always logs;
-// it keeps response bodies only for some responses).
+// Supabase REST tables the page read during the run (from request URLs, which Kane always logs).
 export function restTables(sessionDir) {
-  if (!sessionDir || !existsSync(sessionDir)) return []
   const tables = new Set()
+  for (const entry of entries(sessionDir)) {
+    const m = entry.request?.method === 'GET' && entry.request.url?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)
+    if (m) tables.add(m[1])
+  }
+  return [...tables]
+}
+
+// Kane logs each request in full but keeps no response bodies for API calls (seen on Kane 0.10.4),
+// so the HAR alone can't show what the server sent. These are the page's data reads: GET requests
+// that carried the user's credentials (an Authorization or apikey header), ready to be sent again.
+export function apiRequests(sessionDir, limit = 25) {
+  const out = new Map()
+  for (const entry of entries(sessionDir)) {
+    const req = entry.request
+    if (req?.method !== 'GET' || !/^https?:/.test(req.url ?? '')) continue
+    if (/\/auth\/v1\//.test(req.url)) continue
+    const headers = {}
+    for (const h of req.headers ?? []) if (h?.name && !h.name.startsWith(':')) headers[h.name.toLowerCase()] = h.value
+    if (!headers.authorization && !headers.apikey) continue
+    out.set(req.url, { url: req.url, headers })
+  }
+  return [...out.values()].slice(0, limit)
+}
+
+const NEVER_SEND = new Set(['host', 'content-length', 'connection', 'accept-encoding', 'cookie', 'authorization'])
+
+// Sends each data read again, right after Kane's run while the login token is still valid:
+// once as the stranger (same headers) and once with no login (no Authorization, no cookie).
+// Only GET requests, so nothing in the app changes. Tokens are used here and never written anywhere.
+export async function replayRequests(requests, needle, { timeoutMs = 15_000 } = {}) {
+  const results = []
+  for (const req of requests) {
+    if (req.url.includes(needle)) continue
+    const base = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !NEVER_SEND.has(k)))
+    const login = {}
+    if (req.headers.authorization) login.authorization = req.headers.authorization
+    if (req.headers.cookie) login.cookie = req.headers.cookie
+    const tries = [['stranger', { ...base, ...login }]]
+    if (Object.keys(login).length) tries.push(['anonymous', base])
+    for (const [as, headers] of tries) {
+      const out = { as, method: 'GET', url: req.url, status: null, hit: false }
+      try {
+        const res = await fetch(req.url, { headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+        out.status = res.status
+        const body = await res.text()
+        if (res.ok && body.includes(needle)) {
+          out.hit = true
+          out.where = as === 'stranger' ? "sent again with the stranger's login" : 'sent again with no login'
+          out.snippet = around(body, needle)
+        }
+      } catch (err) {
+        out.error = err.name === 'TimeoutError' ? 'timed out' : err.cause?.code ?? err.message
+      }
+      results.push(out)
+    }
+  }
+  return results
+}
+
+// Every HAR entry in the run's network logs (loose files and inside evidence packs).
+function* entries(sessionDir) {
+  if (!sessionDir || !existsSync(sessionDir)) return
   for (const file of walk(sessionDir, 4)) {
     const texts = ZIP.has(extname(file).toLowerCase())
       ? zipEntries(file).filter((e) => NETWORK.test(e)).map((e) => zipRead(file, e))
@@ -42,14 +102,10 @@ export function restTables(sessionDir) {
         : []
     for (const text of texts) {
       try {
-        for (const entry of JSON.parse(text)?.log?.entries ?? []) {
-          const m = entry.request?.method === 'GET' && entry.request.url?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)
-          if (m) tables.add(m[1])
-        }
+        yield* JSON.parse(text)?.log?.entries ?? []
       } catch {}
     }
   }
-  return [...tables]
 }
 
 // Responses (not requests) that carry the needle, with their URLs.
