@@ -89,24 +89,32 @@ try {
   process.exit(3)
 }
 
-say(`${bold('Stranger')} ${dim('checks')} ${cfg.url}`)
+say(`${bold('Stranger')} ${dim('checks')} ${cfg.url}${cfg.probes.length > 1 ? dim(` with ${cfg.probes.length} probes (${cfg.probes.length * 2} Kane runs)`) : ''}`)
 
 const labels = { owner: `1/2 ${cfg.owner.email} plants a canary`, stranger: `2/2 ${cfg.stranger.email} looks for it` }
 const seenSteps = new Set()
 
 const result = await check(cfg, {
   headless: !values.headed,
-  onProgress: ({ phase, event, canary, run }) => {
+  onProgress: ({ phase, event, canary, run, probe, index, total, replay }) => {
+    if (phase === 'owner' && canary && total > 1) say(`\n${bold(`Probe ${index + 1}/${total}: ${probe}`)}`)
     if (phase === 'owner' && canary) say(`\n  ${labels.owner} ${dim(canary)}`)
     if (phase === 'stranger' && canary) say(`\n  ${labels.stranger}`)
     if (event && event.step !== undefined && (event.status === 'failed' || (event.status === 'done' && event.remark))) {
-      const key = `${phase}:${event.step}:${event.status}`
+      const key = `${index}:${phase}:${event.step}:${event.status}`
       if (seenSteps.has(key)) return
       seenSteps.add(key)
       const mark = event.status === 'done' ? green('✓') : red('✗')
       say(`    ${mark} ${dim(String(event.remark ?? `step ${event.step}`).slice(0, 110))}`)
     }
     if (run) say(`    ${dim(`${run.status} in ${run.seconds}s${run.credits != null ? `, ${run.credits} credits` : ''}`)}`)
+    if (replay?.length) {
+      say(`\n  ${dim('Sending the stranger\'s data reads again')}`)
+      for (const r of replay) {
+        const mark = r.hit ? red('✗') : green('✓')
+        say(`    ${mark} ${dim(`${r.as === 'stranger' ? 'stranger\'s login' : 'no login'.padEnd(16)}  GET ${r.url.split('?')[0].slice(0, 70)} -> ${r.status ?? r.error}${r.hit ? ', owner\'s canary in it' : ''}`)}`)
+      }
+    }
   },
 })
 
@@ -122,11 +130,16 @@ if (values.json) {
       fix: files.fix,
       ownerRun: result.ownerRun?.testUrl ?? null,
       strangerRun: result.strangerRun?.testUrl ?? null,
+      ...(result.probes.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),
     }) + '\n',
   )
 } else {
-  const tag = result.verdict === 'LEAK' ? red('LEAK') : result.verdict === 'CLEAN' ? green('CLEAN') : yellow('INCONCLUSIVE')
-  say(`\n${tag}  ${result.why}`)
+  const paint = (v) => (v === 'LEAK' ? red('LEAK') : v === 'CLEAN' ? green('CLEAN') : yellow('INCONCLUSIVE'))
+  if (result.probes.length > 1) {
+    say('')
+    for (const p of result.probes) say(`  ${paint(p.verdict)}  ${p.probe}`)
+  }
+  say(`\n${paint(result.verdict)}  ${result.why}`)
   if (result.strangerRun?.testUrl) say(dim(`      Kane run: ${result.strangerRun.testUrl}`))
   say(dim(`      Report: ${files.report}`))
   if (files.fix) say(`      Fix brief for your coding agent: ${bold(files.fix)}`)

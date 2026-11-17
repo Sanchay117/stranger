@@ -2,20 +2,23 @@
 
 Signed in as **stranger@duebook.demo**, Kane could see a record that only **maya@duebook.demo** created.
 
-- Canary the owner planted: `stranger-canary-afb57e`
+- Canary the owner planted: `stranger-canary-23f429`
 - How it showed up: on the page
-- Tables the stranger's page read: `invoices`
-- Kane's failing check: assert: the text "stranger-canary-afb57e" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7J7445WJJF4J9HEDY5990DR/dashboard/share/US_AXCN64531FX215G8MXCEUXZ03K68DKLZ7PE0ZIAOC7JI320IP742NE1CETY5QAFP?type=summary&agentView=true&fqdn=summary-page
+- **No login needed:** the API returned it to a request with no login (only the public key), so anyone on the internet can read these rows.
+- Response that carried it: https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/invoices (table `invoices`)
+- Kane's failing check: assert: the text "stranger-canary-23f429" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MFWH7C0FS3TCNEHBB5QN25/dashboard/share/US_9UY0RSVTOXAYM76EZI26DOISI1SOWZOWN1VSPK906181SH8U5FL8MACE4YPE2HRC?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
 
 This app reads its data straight from Supabase, so the database decides who sees which rows (Row Level Security).
 
-Find the SELECT policy on the leaking table. A policy like `using (true)` ("Enable read access for all users") lets every account, and anyone holding the public anon key, read every row.
+Read (SELECT) policies on `invoices`, as your migrations in `supabase/migrations/` leave them:
 
-Replace it with a policy that only returns the signed-in user's rows, for example:
+- `"Enable read access for all users"` (0001_invoices.sql, for select to public): `using (true)` **This lets every account read every row.**
+
+Replace the open policy with one that only returns the signed-in user's rows:
 
 ```sql
 drop policy if exists "Enable read access for all users" on public.invoices;

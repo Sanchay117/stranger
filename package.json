@@ -22,7 +22,8 @@
     "db:seed": "node --env-file=.env scripts/seed.mjs",
     "demo:reset": "node --env-file=.env scripts/demo-reset.mjs",
     "demo": "npm --prefix demo run dev",
-    "stranger": "node stranger/bin/stranger.js run"
+    "stranger": "node stranger/bin/stranger.js run",
+    "test": "node --test stranger/test/stranger.test.js"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.119.0",

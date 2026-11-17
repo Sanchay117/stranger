@@ -1,0 +1,125 @@
+#!/usr/bin/env node
+// A stand-in for "kane-cli run ... --agent" that prints the same NDJSON shape as Kane 0.10.4 and writes
+// a session folder with an evidence pack, so Stranger can be tested without spending Kane credits.
+//
+// FAKE_KANE_MODES: comma list, one mode per probe (probe n uses the n-th; one probe uses the first):
+//   clean           stranger passes, and nothing of the owner's is in the network log
+//   page-leak       stranger fails on the "canary does not appear" check
+//   network-leak    stranger passes (page hid it), but an API response in the HAR carries the canary
+//   control-missing stranger fails because its own record is not in the list
+//   owner-fail      owner cannot plant the canary
+//   no-credits      Kane does not start (exit 2)
+// FAKE_KANE_DIR: where session folders and calls.log go. The owner's canary is written to planted.txt
+//   there, so a test's stand-in API can hand it out.
+// FAKE_KANE_API: base URL the logged data reads point at (a stand-in Supabase in the tests).
+// FAKE_KANE_FORBID: a string that must never appear in argv (a password).
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+
+const args = process.argv.slice(2)
+const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null)
+const objective = args[1]
+const name = flag('--name')
+const out = process.env.FAKE_KANE_DIR
+const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
+
+if (process.env.FAKE_KANE_FORBID && args.some((a) => a.includes(process.env.FAKE_KANE_FORBID))) {
+  console.error('fake-kane: a secret was passed on the command line')
+  process.exit(9)
+}
+const vars = JSON.parse(readFileSync(flag('--variables-file'), 'utf8'))
+if (!vars.password?.secret) {
+  console.error('fake-kane: password was not marked secret')
+  process.exit(9)
+}
+
+const canary = objective.match(/stranger-canary-[0-9a-f]+(?:-\d+)?/)[0]
+const control = objective.match(/stranger-control-[0-9a-f]+(?:-\d+)?/)?.[0]
+const probe = Number(canary.match(/-(\d+)$/)?.[1] ?? 1)
+const modes = (process.env.FAKE_KANE_MODES ?? 'clean').split(',')
+const mode = modes[probe - 1] ?? modes[0]
+const role = name.startsWith('stranger-owner-') ? 'owner' : 'stranger'
+appendFileSync(join(out, 'calls.log'), `${role} ${probe} ${mode}\n`)
+
+if (mode === 'no-credits') {
+  console.error('Insufficient credits')
+  process.exit(2)
+}
+
+const session = join(out, `session-${randomBytes(4).toString('hex')}`)
+mkdirSync(join(session, 'evidence'), { recursive: true })
+const testUrl = `https://kane.example/share/${name}`
+
+// The evidence pack is a zip holding logs/0-network.har, like Kane's.
+function pack(entries) {
+  const tmp = join(session, 'pack')
+  mkdirSync(join(tmp, 'logs'), { recursive: true })
+  writeFileSync(join(tmp, 'logs', '0-network.har'), JSON.stringify({ log: { entries } }))
+  writeFileSync(join(tmp, 'logs', 'kane.log'), `objective: ${objective}\n`) // quotes the canary; must not count
+  execFileSync('zip', ['-qr', join(session, 'evidence', 'run.evidence'), 'logs'], { cwd: tmp })
+  rmSync(tmp, { recursive: true, force: true })
+}
+// Like real Kane 0.10.4: the request is logged in full (headers, bearer token), the response body
+// is not. Only "network-leak" keeps a body, to cover a Kane that someday does.
+const API = process.env.FAKE_KANE_API ?? 'http://127.0.0.1:9'
+const api = (rows) => ({
+  request: {
+    method: 'GET',
+    url: `${API}/rest/v1/invoices?select=*&order=created_at.desc`,
+    headers: [
+      { name: 'apikey', value: 'public-anon-key' },
+      { name: 'Authorization', value: `Bearer tok-${role}` },
+      { name: 'Accept-Profile', value: 'public' },
+    ],
+  },
+  response: { status: 200, content: mode === 'network-leak' ? { text: JSON.stringify(rows) } : { size: -1 } },
+})
+
+const steps = [
+  { step: 1, status: 'done', remark: `navigate: ${flag('--url')}` },
+  { step: 2, status: 'done', remark: 'type: {{global.email}} into Email' },
+  { step: 3, status: 'done', remark: `type: ${role === 'owner' ? canary : control} into Note` },
+]
+for (const s of steps) emit(s)
+
+function end(status, extra, code) {
+  emit({ type: 'run_end', status, test_url: testUrl, session_dir: session, credits_consumed: 1.5, result_code: status === 'passed' ? 100 : 200, ...extra })
+  process.exit(code)
+}
+
+if (role === 'owner') {
+  appendFileSync(join(out, 'planted.txt'), `${canary}\n`)
+  pack([api([{ note: canary }])])
+  if (mode === 'owner-fail') {
+    emit({ step: 4, status: 'failed', remark: 'click: New invoice button not found' })
+    end('failed', { one_liner: 'could not find New invoice', reason: 'New invoice button not found' }, 1)
+  }
+  emit({ step: 4, status: 'done', remark: `assert: the text "${canary}" is visible` })
+  end('passed', { one_liner: 'created and saved an invoice' }, 0)
+}
+
+const own = { note: control }
+const theirs = { note: canary }
+if (mode === 'page-leak') {
+  pack([api([own, theirs])])
+  emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
+  emit({ step: 6, status: 'failed', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
+  end('failed', { one_liner: 'The final check failed because the canary text was present.', reason: 'canary visible' }, 1)
+}
+if (mode === 'network-leak') {
+  pack([api([own, theirs])])
+  emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
+  emit({ step: 6, status: 'done', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
+  end('passed', { one_liner: 'the stranger saw only their own invoice' }, 0)
+}
+if (mode === 'control-missing') {
+  pack([api([])])
+  emit({ step: 5, status: 'failed', remark: `assert: the text "${control}" is visible on the page` })
+  end('failed', { one_liner: 'own invoice not listed', reason: 'control not visible' }, 1)
+}
+pack([api([own])])
+emit({ step: 5, status: 'done', remark: `assert: the text "${control}" is visible on the page` })
+emit({ step: 6, status: 'done', remark: `assert: the text "${canary}" does not appear anywhere on the page` })
+end('passed', { one_liner: 'the stranger saw only their own invoice' }, 0)

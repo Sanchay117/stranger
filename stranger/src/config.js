@@ -30,11 +30,27 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   cfg.url = fromEnv(cfg.url, 'url')
   cfg.plant ??= 'create a new record in the app (for example an invoice, note, post or message) and type the text into its main free-text field'
   cfg.look ??= 'the main list of records in the app'
+  cfg.probes = probesOf(cfg, path)
   cfg.database ??= 'unknown'
   cfg.migrations ??= null
   cfg.timeout ??= 420
   cfg.root = root
   return cfg
+}
+
+// One probe per kind of private record. Without "probes", the top-level plant and look are the only probe.
+// Each probe costs two Kane runs (owner, then stranger), so list only the records that matter.
+function probesOf(cfg, path) {
+  if (cfg.probes == null) return [{ name: 'main', plant: cfg.plant, look: cfg.look }]
+  if (!Array.isArray(cfg.probes) || !cfg.probes.length) throw new Error(`${path}: "probes" must be a non-empty list`)
+  const names = new Set()
+  return cfg.probes.map((p, i) => {
+    const name = String(p?.name ?? `probe ${i + 1}`)
+    if (names.has(name)) throw new Error(`${path}: two probes are called "${name}"`)
+    names.add(name)
+    if (typeof p?.plant !== 'string' || typeof p?.look !== 'string') throw new Error(`${path}: probe "${name}" needs "plant" and "look"`)
+    return { name, plant: p.plant, look: p.look }
+  })
 }
 
 export const TEMPLATE = {
