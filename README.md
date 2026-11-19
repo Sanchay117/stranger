@@ -130,7 +130,7 @@ This adds a Stranger skill and a Stop hook. While `.stranger/armed` exists and w
 
 ## The bench: ten ways to leak, and what Stranger caught
 
-<!-- bench-score -->**Stranger caught 8 of 9 bugs and stayed quiet on the clean control**, in 10 real Kane CLI runs (19 Nov 2026).<!-- /bench-score -->
+<!-- bench-score -->**Stranger caught 9 of 9 bugs and stayed quiet on the clean control**, in 10 real Kane CLI runs (19 Nov 2026).<!-- /bench-score -->
 
 The bench is one small notes app with ten cases on one Supabase project. Each case leaves in one bug from a different class, and one leaves in none: row level security off, a filter only in the page, a view without `security_invoker`, a database function that returns everyone's rows, a record page that skips the owner check, an insert without `with check`, a total that adds up everyone, files any account can read, live updates on a public channel, and a clean control. Stranger runs on each one with the real Kane CLI, the same way it runs on any app.
 

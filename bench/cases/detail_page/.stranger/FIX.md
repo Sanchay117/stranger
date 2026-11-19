@@ -11,26 +11,16 @@ Owner: **maya@duebook.demo**. Stranger: **stranger@duebook.demo**.
 
 ## What to fix
 
-This app reads its data straight from Supabase, so the database decides who sees which rows (Row Level Security).
+The list page hid the owner's record, but its own page (http://localhost:5231/bench/?case=detail_page&note=345e95a9-1acb-4db5-bfb5-d5e2ed251281) showed it to the stranger. Whatever loads one record by its id does not check who is asking.
 
-Read (SELECT) policies on `bench_detail_page`, as your migrations in `../../migrations/` leave them:
+The pages called `bench_detail_page_get()` (04_detail_page.sql): a `security definer` function that takes the record's id. It reads the table with its creator's rights, so row level security never applies, and it is the likely loader of that page. (Stranger never calls a function that takes arguments itself, so this is where to look, not a second proof.) The table's own read policy may be fine.
 
-- `"Owners read their notes"` (04_detail_page.sql, for select to authenticated): `using ((select auth.uid()) = user_id)`
-
-None of these looks open at a glance, so check what else can return these rows: a wider condition in one of them, a view, a `security definer` function, or a policy added in the dashboard (compare with `select * from pg_policies where tablename = 'bench_detail_page'`).
-
-Each account should only get its own rows back, for example:
+Make it run with the caller's rights, or check the owner inside it, in a new migration:
 
 ```sql
-drop policy if exists "Enable read access for all users" on public.bench_detail_page;
-create policy "Owners can read their own rows" on public.bench_detail_page
-  for select to authenticated
-  using ((select auth.uid()) = user_id);
+alter function public.bench_detail_page_get security invoker;
+-- or keep it security definer and add  and user_id = (select auth.uid())  to its where clause
 ```
-
-Write it as a new migration in `../../migrations/` (never edit an applied one), apply it, and check UPDATE and DELETE policies on the same table too.
-
-The list page hid the owner's record, but its own page (http://localhost:5231/bench/?case=detail_page&note=345e95a9-1acb-4db5-bfb5-d5e2ed251281) showed it to the stranger. Whatever loads one record by its id does not check who is asking. Fix that check on the server, in the policy or function the record page reads, not by hiding the link.
 
 Do not fix this by filtering rows in the page or the client code. The data still reaches the browser, and anyone can call the API directly.
 
