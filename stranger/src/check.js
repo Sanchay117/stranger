@@ -328,18 +328,17 @@ async function apiChecks(cfg, owner, stranger, canary) {
   if (blast) out.blast = blast.entries()
 
   // Database functions the pages called: only the safe ones (no arguments, cannot write) are sent again.
-  if (cfg.rpc !== false) {
-    const calls = new Map()
-    for (const [page, run] of [['owner', owner], ['stranger', stranger]]) {
-      for (const c of rpcCalls(run.sessionDir)) calls.set(c.url, calls.has(c.url) ? { ...calls.get(c.url), page: 'both' } : { ...c, page })
-    }
-    if (calls.size) out.replay.push(...(await replayRpc([...calls.values()], canary, strangerLogin, functionsIn(dir))))
+  const calls = new Map()
+  for (const [page, run] of [['owner', owner], ['stranger', stranger]]) {
+    for (const c of rpcCalls(run.sessionDir)) calls.set(c.url, calls.has(c.url) ? { ...calls.get(c.url), page: 'both' } : { ...c, page })
   }
+  if (cfg.rpc !== false && calls.size) out.replay.push(...(await replayRpc([...calls.values()], canary, strangerLogin, functionsIn(dir))))
 
   const wantsRow = cfg.numeric || cfg.tamper || cfg.forge || cfg.realtime
   const buckets = cfg.storage ? [...new Set([...(cfg.storageBuckets ?? []), ...storageBuckets(owner.sessionDir), ...storageBuckets(stranger.sessionDir)])] : []
   if (!wantsRow && !buckets.length && !cfg.personas.length) return out
-  const target = supabaseTarget(list)
+  // A page may call only database functions; their address names the Supabase project just as well.
+  const target = supabaseTarget(list) ?? supabaseTarget([...calls.values()])
   if (!target) {
     out.notes.push('Tamper, forge, numeric, storage, realtime and persona checks need a Supabase API in the logs; none was found.')
     return out
