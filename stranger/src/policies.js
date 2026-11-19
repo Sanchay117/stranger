@@ -37,11 +37,12 @@ export function readPolicies(dir, table) {
           command: (rest.match(/\bfor\s+(all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase(),
           roles: rest.match(/\bto\s+([\w\s,]+?)(?=\s+(?:using|with)\b|$)/i)?.[1].trim() ?? 'public',
           using: clause(rest, 'using'),
+          check: clause(rest, 'with\\s+check'),
         })
       }
     }
   }
-  out.all = [...policies.values()].map((p) => ({ ...p, open: isOpen(p.using) }))
+  out.all = [...policies.values()].map((p) => ({ ...p, open: isOpen(p.using), checkOpen: isOpen(p.check) }))
   out.select = out.all.filter((p) => p.command === 'select' || p.command === 'all')
   return out
 }

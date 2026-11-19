@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { homedir } from 'node:os'
-import { readPolicies } from './policies.js'
+import { functionsIn, readPolicies, viewsIn } from './policies.js'
 
 // Reports get committed, so local paths show as ~/... instead of naming the user's home folder.
 const tidy = (text) => text.split(homedir()).join('~')
@@ -130,9 +130,13 @@ function apiLines(p, multi) {
   if (p.replay?.length) {
     lines.push(
       head('Data reads sent again'),
-      `Right after Kane's runs, Stranger sent every data read from both pages again (GET only): with the stranger's login, then with none.`,
+      `Right after Kane's runs, Stranger sent every data read from both pages again (GETs, and database functions that cannot write and take no arguments): with the stranger's login, then with none.`,
       '',
-      ...p.replay.map((r) => `- ${r.as === 'stranger' ? "With the stranger's login" : 'With no login'}: GET ${r.url.split('?')[0]} (${r.page === 'owner' ? "owner's page" : r.page === 'both' ? 'both pages' : "stranger's page"}) -> ${r.status ?? r.error}${r.hit ? ", **owner's canary in the response**" : ''}`),
+      ...p.replay.map((r) =>
+        r.skipped
+          ? `- Not sent again: ${r.method} ${r.url.split('?')[0]} (${r.skipped})`
+          : `- ${r.as === 'stranger' ? "With the stranger's login" : 'With no login'}: ${r.method ?? 'GET'} ${r.url.split('?')[0]} (${r.page === 'owner' ? "owner's page" : r.page === 'both' ? 'both pages' : "stranger's page"}) -> ${r.status ?? r.error}${r.hit ? ", **owner's canary in the response**" : ''}`,
+      ),
       '',
     )
   }
@@ -162,6 +166,47 @@ function apiLines(p, multi) {
         `- Change \`${t.field}\`: ${t.edited ? '**the owner\'s row changed**' : 'blocked, the row is as the owner left it'} (HTTP ${t.editStatus ?? '?'})`,
         `- Delete: ${t.deleted ? '**the owner\'s row was deleted**' : 'blocked, the row is still there'} (HTTP ${t.deleteStatus ?? '?'})`,
         ...(t.restored != null ? [`- Put back by the owner afterwards: ${t.restored ? 'yes' : '**no**'}`] : []),
+        '',
+      )
+    }
+  }
+  const f = a.forge
+  if (f) {
+    lines.push(head('Forged owner'))
+    if (!f.ran) lines.push(`Not run: ${f.why}.`, '')
+    else {
+      lines.push(
+        `Signed in as the stranger, Stranger tried to add a row to \`${f.table}\` that names the owner in \`${f.column}\` (HTTP ${f.status ?? '?'}).`,
+        '',
+        `- ${f.forged ? "**It was stored: the stranger put a record into the owner's account.**" : 'Refused: no such row was stored.'}`,
+        ...(f.forged || !f.cleaned ? [`- Deleted again afterwards: ${f.cleaned ? 'yes' : '**no**'}`] : []),
+        '',
+      )
+    }
+  }
+  if (a.storage?.length) {
+    lines.push(head('Files'), "In each storage bucket the pages used, the owner uploaded a small file holding the canary. Then the stranger, and a request with no login, tried to download it and to list the owner's folder.", '')
+    for (const s of a.storage) {
+      if (!s.ran) lines.push(`- \`${s.bucket}\`: not run, ${s.why}`)
+      else {
+        lines.push(
+          `- \`${s.bucket}\`: ${s.tries.map((t) => `${t.as === 'stranger' ? 'stranger' : 'no login'} ${t.kind} ${t.hit ? '**got it**' : 'blocked'} (HTTP ${t.status ?? '?'})`).join(', ')}. ${s.cleaned ? 'File deleted afterwards.' : '**The file could not be deleted.**'}`,
+        )
+      }
+    }
+    lines.push('')
+  }
+  const rt = a.realtime
+  if (rt) {
+    lines.push(head('Live updates'))
+    if (!rt.ran) lines.push(`Not run: ${rt.why}.`, '')
+    else {
+      lines.push(
+        `The stranger opened the app's realtime connection and listened for database changes on \`${rt.table}\` and on ${rt.topics.length} likely channels (${rt.topics.map((t) => `\`${t}\``).join(', ')}). Then the owner added a row.`,
+        '',
+        `- Joined: ${rt.joined.length ? rt.joined.map((t) => `\`${t}\``).join(', ') : 'none'}`,
+        `- ${rt.heard.length ? `**Heard the owner's row:** ${rt.heard.map((h) => `${h.kind} on \`${h.topic}\``).join(', ')}` : "Heard nothing of the owner's row."}`,
+        `- Row deleted afterwards: ${rt.cleaned ? 'yes' : '**no**'}`,
         '',
       )
     }
@@ -217,6 +262,12 @@ function report(cfg, r) {
   }
   for (const p of probes) {
     lines.push(multi ? `## Kane runs: ${p.probe}` : '## Kane runs', ...runLines('Owner plants the canary', p.ownerRun), ...runLines('Stranger looks for it', p.strangerRun), '')
+    if (p.links?.length) {
+      lines.push(
+        `The stranger also opened the owner's own record ${p.links.length === 1 ? 'page' : 'pages'} directly, by address from the owner's run: ${p.links.map((l) => `\`${l}\``).join(', ')}${p.seen === 'direct-link' ? ". **The owner's canary showed there.**" : '.'}`,
+        '',
+      )
+    }
     lines.push(...apiLines(p, multi))
     const found = [...(p.evidence ?? []), ...(p.anonymous ?? [])]
     if (found.length) {
@@ -229,9 +280,15 @@ function report(cfg, r) {
 // The table a failing probe points at: the response that carried the canary, else the API checks' row,
 // else the only table its pages read.
 const tableOf = (p) =>
-  [...(p.evidence ?? []), ...(p.anonymous ?? [])].find((h) => h.url)?.url?.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1] ??
+  [...(p.evidence ?? []), ...(p.anonymous ?? [])].find((h) => h.url)?.url?.match(/\/rest\/v1\/(?!rpc\/)([A-Za-z0-9_]+)/)?.[1] ??
+  (p.findings ?? []).find((f) => f.table)?.table ??
   p.api?.row?.table ??
   (p.tables?.length === 1 ? p.tables[0] : undefined)
+
+// The page check, the read replays, a direct link or live database changes: the table's read policy is open.
+const READ_SEEN = new Set(['page', 'network', 'anonymous', 'direct-link'])
+const hits = (p) => [...(p.evidence ?? []), ...(p.anonymous ?? [])]
+const rpcNames = (p) => [...new Set(hits(p).map((h) => h.url?.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/)?.[1]).filter(Boolean))]
 
 const TITLES = { LEAK: 'Stranger found a data leak', TAMPER: "Stranger found that the stranger can change the owner's data", OVERLOCKED: 'Stranger found someone locked out who should see the data' }
 
@@ -240,7 +297,18 @@ function fix(cfg, r) {
   const multi = (r.probes?.length ?? 1) > 1
   const hint = HINTS[cfg.database] ?? HINTS.unknown
   const kinds = new Set(failing.flatMap((p) => [p.verdict, ...(p.findings ?? []).map((f) => f.kind)]))
-  const readLeak = failing.some((p) => p.verdict === 'LEAK' && p.seen !== 'aggregate' && p.seen !== 'persona') || failing.some((p) => (p.evidence?.length || p.anonymous?.length))
+  const findings = failing.flatMap((p) => p.findings ?? [])
+  const rpcs = [...new Set(failing.flatMap(rpcNames))]
+  const viaTable = (p) => hits(p).some((h) => h.url && !/\/rest\/v1\/rpc\//.test(h.url))
+  const readLeak =
+    failing.some((p) => p.verdict === 'LEAK' && READ_SEEN.has(p.seen) && (viaTable(p) || !rpcNames(p).length)) ||
+    failing.some(viaTable) ||
+    findings.some((f) => f.seen === 'realtime' && f.heard?.includes('database changes'))
+  const directLink = failing.filter((p) => p.seen === 'direct-link')
+  const forged = findings.filter((f) => f.seen === 'forged')
+  const files = findings.filter((f) => f.seen === 'storage')
+  const broadcast = findings.filter((f) => f.seen === 'realtime' && f.heard?.includes('broadcast'))
+  const changedRow = findings.some((f) => f.kind === 'TAMPER' && f.seen !== 'forged')
   const aggregate = failing.some((p) => p.findings?.some((f) => f.seen === 'aggregate'))
   const persona = failing.some((p) => p.findings?.some((f) => f.seen === 'persona'))
   const known = [...new Set(failing.map(tableOf))].filter(Boolean)
@@ -253,7 +321,7 @@ function fix(cfg, r) {
       multi ? `### ${p.probe}` : null,
       multi ? '' : null,
       `- Canary the owner planted: \`${p.canary}\``,
-      p.verdict === 'LEAK' && p.seen ? `- How it showed up: ${{ network: 'in what the server sent the stranger', anonymous: 'in what the server sends with no login at all', aggregate: "in the stranger's totals or counts, which moved when only the owner acted", persona: 'to an account that should not see it' }[p.seen] ?? 'on the page'}` : null,
+      p.verdict === 'LEAK' && p.seen ? `- How it showed up: ${{ network: 'in what the server sent the stranger', anonymous: 'in what the server sends with no login at all', aggregate: "in the stranger's totals or counts, which moved when only the owner acted", persona: 'to an account that should not see it', 'direct-link': `on the owner's own record page, which the stranger opened by its address (${(p.links ?? []).join(', ')})`, storage: 'in a file the stranger could download or list', realtime: "in the app's live updates" }[p.seen] ?? 'on the page'}` : null,
       p.anonymous?.length ? `- **No login needed:** the API returned it to a request with no login (only the public key), so anyone on the internet can read these rows.` : null,
       where ? `- Response that carried it: ${where.split('?')[0]}${table ? ` (table \`${table}\`)` : ''}` : null,
       !where && table ? `- Table: \`${table}\`` : null,
@@ -273,7 +341,8 @@ function fix(cfg, r) {
         '',
       )
     }
-    if (kinds.has('TAMPER')) lines.push(...writeHint(cfg, t), '')
+    if (changedRow) lines.push(...writeHint(cfg, t), '')
+    if (forged.some((f) => !t || f.table === t)) lines.push(...insertHint(cfg, t ?? forged[0].table, forged[0].column), '')
     if (kinds.has('OVERLOCKED')) {
       lines.push(
         'Someone who should see these rows, like a teammate, is now locked out. `auth.uid() = user_id` is right for private rows, but shared rows need a membership check too, for example:',
@@ -297,6 +366,19 @@ function fix(cfg, r) {
     return lines
   }
   const liveNote = r.live?.error ? [`(Live policies not shown: ${r.live.error}.)`, ''] : []
+  const dir = cfg.migrations ? join(cfg.root, cfg.migrations) : null
+  const extra = [
+    ...(directLink.length
+      ? [
+          `The list page hid the owner's record, but its own page (${directLink.flatMap((p) => p.links ?? []).join(', ')}) showed it to the stranger. Whatever loads one record by its id does not check who is asking. Fix that check on the server, in the policy or function the record page reads, not by hiding the link.`,
+          '',
+        ]
+      : []),
+    ...(rpcs.length ? rpcHint(dir, rpcs) : []),
+    ...known.flatMap((t) => (viewsIn(dir).get(t)?.invoker === false ? viewHint(viewsIn(dir).get(t), t) : [])),
+    ...(files.length ? storageHint(dir, [...new Set(files.map((f) => f.bucket))]) : []),
+    ...(broadcast.length ? broadcastHint(broadcast[0].table ?? known[0]) : []),
+  ]
 
   return [
     `# ${TITLES[r.verdict] ?? 'Stranger found a problem'}`,
@@ -311,6 +393,7 @@ function fix(cfg, r) {
     '## What to fix',
     '',
     ...(known.length > 1 && cfg.database === 'supabase' ? known.flatMap((t) => [`### Table \`${t}\``, '', ...perTable(t)]) : perTable(known[0])),
+    ...extra,
     ...liveNote,
     'Do not fix this by filtering rows in the page or the client code. The data still reaches the browser, and anyone can call the API directly.',
     '',
@@ -341,5 +424,91 @@ function writeHint(cfg, t) {
     '  for delete to authenticated',
     `  using ((select auth.uid()) = ${col});`,
     '```',
+  ]
+}
+
+function insertHint(cfg, t, column) {
+  const found = t && cfg.migrations ? readPolicies(join(cfg.root, cfg.migrations), t) : null
+  const col = column ?? found?.ownerColumn ?? 'user_id'
+  const inserts = found?.all.filter((p) => p.command === 'insert' || p.command === 'all') ?? []
+  return [
+    `The stranger could add a row to \`${t}\` with the owner's id in \`${col}\`. The insert policy never checks that new rows belong to the person adding them, so anyone can put records into anyone's account.`,
+    ...(inserts.length ? ['', 'Your migrations leave these insert policies:', '', ...inserts.map((p) => `- \`"${p.name}"\` (${p.file}, for ${p.command}): \`with check (${p.check ?? ''})\`${p.checkOpen || p.check == null ? ' **checks nothing about the owner**' : ''}`)] : []),
+    '',
+    'New rows should only be allowed in the signed-in user\'s own name:',
+    '',
+    '```sql',
+    ...inserts.filter((p) => p.checkOpen || p.check == null).map((p) => `drop policy if exists "${p.name}" on public.${t};`),
+    `create policy "Users can add their own rows" on public.${t}`,
+    '  for insert to authenticated',
+    `  with check ((select auth.uid()) = ${col});`,
+    '```',
+  ]
+}
+
+function rpcHint(dir, names) {
+  const fns = functionsIn(dir)
+  return [
+    `The owner's canary came back from ${names.map((n) => `\`${n}()\``).join(', ')}, a database function the app calls. ${names.some((n) => fns.get(n)?.definer) ? 'It is `security definer`, so it runs with its creator\'s rights and row level security never applies to what it reads.' : 'It returns rows from every account.'}`,
+    '',
+    ...names.filter((n) => fns.get(n)).map((n) => `- \`${n}()\` is in ${fns.get(n).file}${fns.get(n).definer ? ' (security definer)' : ''}`),
+    '',
+    'Make it run with the caller\'s rights, or filter by the caller inside it, in a new migration:',
+    '',
+    '```sql',
+    ...names.map((n) => `alter function public.${n}() security invoker;`),
+    '-- or, if it must stay security definer, add  where user_id = (select auth.uid())  to its query',
+    '```',
+    '',
+  ]
+}
+
+function viewHint(view, t) {
+  return [
+    `\`${t}\` is a view (${view.file}) made without \`security_invoker\`, so it reads its tables with its creator's rights and row level security never applies.`,
+    '',
+    '```sql',
+    `alter view public.${t} set (security_invoker = true);`,
+    '```',
+    '',
+  ]
+}
+
+function storageHint(dir, buckets) {
+  const open = readPolicies(dir, 'objects').all.filter((p) => p.open && ['select', 'all'].includes(p.command))
+  return [
+    `Files in ${buckets.map((b) => `\`${b}\``).join(', ')} are readable by accounts that don't own them. Supabase Storage keeps files in \`storage.objects\`, and its policies decide who can read each file. A public bucket skips them for downloads altogether.`,
+    ...(open.length ? ['', 'Your migrations leave these open read policies on storage.objects:', '', ...open.map((p) => `- \`"${p.name}"\` (${p.file}): \`using (${p.using})\``)] : []),
+    '',
+    "Keep the bucket private and upload each file under the owner's id (`<user id>/file.txt`), then only let owners read their own folder:",
+    '',
+    '```sql',
+    ...buckets.map((b) => `update storage.buckets set public = false where id = '${b}';`),
+    ...open.map((p) => `drop policy if exists "${p.name}" on storage.objects;`),
+    'create policy "Owners can read their own files" on storage.objects',
+    '  for select to authenticated',
+    `  using (bucket_id in (${buckets.map((b) => `'${b}'`).join(', ')}) and (storage.foldername(name))[1] = (select auth.uid())::text);`,
+    '```',
+    '',
+  ]
+}
+
+function broadcastHint(t) {
+  return [
+    "The stranger joined a live-updates channel named after the owner and heard the owner's new row. Broadcast channels are public unless they are marked private, and their names are easy to guess, so anyone who knows the name hears everything sent on it.",
+    '',
+    'Send on a private channel and add a policy on `realtime.messages` that only lets each user join their own topic:',
+    '',
+    '```sql',
+    `-- where the row is sent, the last argument makes the message private`,
+    `perform realtime.send(payload, 'new_row', '${t ?? '<table>'}:' || new.user_id::text, true);`,
+    '',
+    'create policy "Users hear only their own topic" on realtime.messages',
+    '  for select to authenticated',
+    `  using ((select realtime.topic()) = '${t ?? '<table>'}:' || (select auth.uid())::text);`,
+    '```',
+    '',
+    'In the client, join with `supabase.channel(topic, { config: { private: true } })`.',
+    '',
   ]
 }

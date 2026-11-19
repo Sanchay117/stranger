@@ -272,20 +272,20 @@ function withApiFindings(cfg, result, verdict) {
   }
   if (tamper?.ran && (tamper.edited || tamper.deleted)) {
     const what = [tamper.edited && 'change', tamper.deleted && 'delete'].filter(Boolean).join(' and ')
-    findings.push({ kind: 'TAMPER', text: `The stranger could ${what} the owner's row in \`${tamper.table}\`.${tamper.restored === false ? ' Stranger could not put it back.' : ''}` })
+    findings.push({ kind: 'TAMPER', table: tamper.table, text: `The stranger could ${what} the owner's row in \`${tamper.table}\`.${tamper.restored === false ? ' Stranger could not put it back.' : ''}` })
   }
 
   if (forge?.ran && forge.forged) {
-    findings.push({ kind: 'TAMPER', seen: 'forged', text: `The stranger could create a row in \`${forge.table}\` that names the owner in \`${forge.column}\`, so anyone can add records to someone else's account.${forge.cleaned ? '' : ' Stranger could not delete it again.'}` })
+    findings.push({ kind: 'TAMPER', seen: 'forged', table: forge.table, column: forge.column, text: `The stranger could create a row in \`${forge.table}\` that names the owner in \`${forge.column}\`, so anyone can add records to someone else's account.${forge.cleaned ? '' : ' Stranger could not delete it again.'}` })
   }
   for (const s of storage ?? []) {
     const hits = s.ran ? s.tries.filter((t) => t.hit) : []
     if (hits.length) {
-      findings.push({ kind: 'LEAK', seen: 'storage', text: `The owner's file in the \`${s.bucket}\` storage bucket: ${hits.map((h) => `${h.as === 'stranger' ? 'the stranger' : 'anyone with no login'} could ${h.kind === 'download' ? 'download it' : 'see it in a listing'}`).join(', ')}.` })
+      findings.push({ kind: 'LEAK', seen: 'storage', bucket: s.bucket, text: `The owner's file in the \`${s.bucket}\` storage bucket: ${hits.map((h) => `${h.as === 'stranger' ? 'the stranger' : 'anyone with no login'} could ${h.kind === 'download' ? 'download it' : 'see it in a listing'}`).join(', ')}.` })
     }
   }
   if (realtime?.ran && realtime.heard.length) {
-    findings.push({ kind: 'LEAK', seen: 'realtime', text: `Listening to the app's live updates, the stranger received the owner's new row the moment it was saved (${realtime.heard.map((h) => `${h.kind} on \`${h.topic}\``).join(', ')}).` })
+    findings.push({ kind: 'LEAK', seen: 'realtime', table: realtime.table, heard: realtime.heard.map((h) => h.kind), text: `Listening to the app's live updates, the stranger received the owner's new row the moment it was saved (${realtime.heard.map((h) => `${h.kind} on \`${h.topic}\``).join(', ')}).` })
   }
 
   let out = { ...result, ...verdict, findings }

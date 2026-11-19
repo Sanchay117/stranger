@@ -452,12 +452,14 @@ export async function realtimeCheck(target, found, ownerLogin, strangerLogin, ca
     ws.close()
   } catch {}
   if (!ins.ok) return { ran: false, why: `the owner could not add a row to listen for (${ins.status ?? ins.error})` }
+  // Reports are committed, so the owner's account id shows as {owner} in topic names.
+  const shown = (t) => (t === changes ? `database changes on ${table}` : sub ? t.replaceAll(sub, '{owner}') : t)
   return {
     ran: true,
     table,
-    topics: names,
-    joined: [...joined].map((t) => (t === changes ? `database changes on ${table}` : t)),
-    heard: [...heard].map(([topic, kind]) => ({ topic: topic === changes ? `database changes on ${table}` : topic, kind })),
+    topics: names.map(shown),
+    joined: [...joined].map(shown),
+    heard: [...heard].map(([topic, kind]) => ({ topic: shown(topic), kind })),
     cleaned: !!del?.ok,
   }
 }
