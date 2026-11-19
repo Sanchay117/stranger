@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { call, signIn, subjectOf, OWNER_COLUMNS } from './api.js'
 import { readPolicies } from './policies.js'
@@ -64,6 +64,32 @@ export function loadGuards(cfg) {
 function saveGuards(file, data) {
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, JSON.stringify(data, null, 2) + '\n')
+}
+
+// One line per "stranger guard" in .stranger/guards/history.jsonl (tracked, like the run history): what each
+// guard said, and for Kane guards the share link, credits and policy result. No rows, tokens or local paths.
+export function logGuardRun(cfg, { verdict, api = [], kane = null, at = new Date().toISOString() }) {
+  const file = join(cfg.root, '.stranger', 'guards', 'history.jsonl')
+  mkdirSync(dirname(file), { recursive: true })
+  const entry = {
+    at,
+    verdict,
+    url: cfg.url,
+    guards: api.map(({ id, status }) => ({ id, status })),
+    ...(kane
+      ? {
+          kane: {
+            results: kane.results.map(({ file, status, why, testUrl, credits, replayed, authored }) => ({ file, status, why, testUrl, credits, replayed, authored })),
+            credits: kane.credits,
+            seconds: kane.seconds,
+            policy: kane.policy?.result ? { result: kane.policy.result, failedGates: kane.policy.failedGates ?? [] } : null,
+            cleaned: kane.cleaned,
+          },
+        }
+      : {}),
+  }
+  appendFileSync(file, JSON.stringify(entry) + '\n')
+  return entry
 }
 
 // After a Stranger run: every leaking read becomes an API guard, and every probe where Kane saw the owner's

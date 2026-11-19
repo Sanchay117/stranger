@@ -6,7 +6,7 @@ import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
 import { blastRows, renderReport, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
-import { checkGuards, loadGuards, recordGuards, runKaneGuards, updateStates } from '../src/guards.js'
+import { checkGuards, loadGuards, logGuardRun, recordGuards, runKaneGuards, updateStates } from '../src/guards.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
 
@@ -152,12 +152,12 @@ if (command === 'guard') {
     })
     for (const r of kane?.results ?? []) {
       say(`  ${paint(r.status.padEnd(7))} ${r.file} ${dim(r.why)}`)
-      const how =
-        r.replayed && !r.authored
-          ? `replayed ${r.replayed} recorded steps`
-          : r.authored != null
-            ? `Kane wrote ${r.authored} steps${r.recorded === true ? ' and kept the recording, so later runs replay it' : r.recorded === false ? '; no recording kept (Kane keeps one only when the test passes)' : ''}`
-            : null
+      const steps = (n) => `${n} ${n === 1 ? 'step' : 'steps'}`
+      const how = [
+        r.replayed ? `replayed ${steps(r.replayed)} from Kane's recording` : null,
+        r.authored ? `Kane wrote ${steps(r.authored)}${r.replayed ? ' again' : ''}` : null,
+        r.recorded === false && r.authored ? 'a failing step is written again next run' : null,
+      ].filter(Boolean).join(', ') || null
       const bits = [how, r.credits != null ? `${r.credits} credits` : null, r.testUrl].filter(Boolean)
       if (bits.length) say(dim(`          ${bits.join(', ')}`))
     }
@@ -173,6 +173,7 @@ if (command === 'guard') {
   updateStates(cfg, api, kane?.results ?? [])
   const all = [...api, ...(kane?.results ?? [])]
   const verdict = !all.length ? 'NONE' : all.some((r) => r.status === 'BROKEN') ? 'BROKEN' : all.some((r) => r.status === 'UNKNOWN') ? 'UNKNOWN' : 'HOLDS'
+  if (all.length) logGuardRun(cfg, { verdict, api, kane })
   if (values.json) {
     process.stdout.write(
       JSON.stringify({

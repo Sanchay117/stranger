@@ -1014,6 +1014,13 @@ test('Kane guards: replayed with kane-cli testrun and a verdict policy; logins s
   const short = await guard(p, ['--kane'], 'text-leak')
   assert.equal(short.out.kane.results[0].status, 'BROKEN', 'a stream with only a failure message still counts')
 
+  const history = readFileSync(join(p.root, '.stranger', 'guards', 'history.jsonl'), 'utf8')
+  const lines = history.trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(lines.map((l) => l.kane.results[0].status), ['HOLDS', 'HOLDS', 'BROKEN', 'UNKNOWN', 'UNKNOWN', 'BROKEN'])
+  assert.equal(lines[2].kane.results[0].testUrl, 'https://kane.example/share/guard')
+  assert.deepEqual(lines[2].kane.policy, { result: 'fail', failedGates: ['no-leak-came-back'] })
+  assert.ok(!history.includes(PASSWORD) && !history.includes(p.root), 'no logins or local paths in the tracked history')
+
   const careless = await spawnAsync([BIN, 'guard', '--kane'], { cwd: p.root, env: env(p, 'clean', { SUPABASE_URL: API, SUPABASE_ANON_KEY: 'public-anon-key', FAKE_KANE_LEAK_SECRET: '1' }) })
   assert.match(careless.stderr, /recordings hold a password/)
 })
