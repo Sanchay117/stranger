@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, configured } from '../src/supabase'
+import { Halftone } from '../src/Art.jsx'
 import { caseById } from './cases.js'
 import Scorecard from './Scorecard.jsx'
 
@@ -244,7 +245,8 @@ function Notes({ c, session }) {
           </section>
         )}
 
-        <section className="summary">
+        <section className="summary halftone">
+          <Halftone seed={5} />
           <div>
             <p className="muted">{c.total ? 'Total of your notes' : 'Your notes'}</p>
             <p className="big">{c.total ? money(total?.total_cents) : notes.length}</p>
