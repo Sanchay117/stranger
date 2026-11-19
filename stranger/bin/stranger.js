@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
-import { blastRows, writeReport } from '../src/report.js'
+import { blastRows, renderReport, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
@@ -12,6 +13,7 @@ Usage
   stranger run             Plant a canary as the owner, then look for it as a second account (two Kane CLI runs)
   stranger init            Write a starter stranger.config.json
   stranger install-claude  Add the Stranger skill and Stop hook to this project's .claude/
+  stranger report          Rewrite .stranger/report.md and FIX.md from the last run (no Kane run)
 
 Options
   --config <path>  Config file (default: stranger.config.json)
@@ -71,6 +73,19 @@ if (command === 'install-claude') {
   console.log('\nArm the hook with: touch .stranger/armed   (disarm: rm .stranger/armed)')
   if (!existsSync(values.config)) console.log('No stranger.config.json yet: run "stranger init" first.')
   process.exit(0)
+}
+
+if (command === 'report') {
+  try {
+    const cfg = loadConfig(values.config)
+    const last = JSON.parse(readFileSync(join(cfg.root, '.stranger', 'last.json'), 'utf8'))
+    const files = renderReport(cfg, last)
+    console.log(`Rewrote ${files.report}${files.fix ? ` and ${files.fix}` : ''} from run ${last.id} (${last.verdict}).`)
+    process.exit(0)
+  } catch (err) {
+    console.error(`stranger report: ${err.code === 'ENOENT' ? 'no .stranger/last.json yet: run "stranger run" first' : err.message}`)
+    process.exit(3)
+  }
 }
 
 if (command !== 'run') {

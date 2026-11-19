@@ -764,6 +764,19 @@ test('direct links: the list hides the record, but its own page shows it to the 
   assert.match(r.read('report.md'), /opened the owner's own record page directly[\s\S]*The owner's canary showed there/)
 })
 
+test('direct links: a record page loaded by a security definer function gets that function named in the brief', async () => {
+  const getter = 'create or replace function public.get_invoice(invoice_id uuid) returns setof public.invoices language sql stable security definer as $$ select * from public.invoices where id = invoice_id $$;'
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fix.sql', FIXED], ['0003_get.sql', getter]] })
+  setApi(p)
+  const r = await run(p, 'link-leak', { FAKE_KANE_LINK: 'http://localhost:5231/duebook/invoice/123e4567-e89b-12d3-a456-426614174000', FAKE_KANE_RPC: 'get_invoice' })
+  assert.equal(r.out.verdict, 'LEAK', r.out.why)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /The pages called `get_invoice\(\)` \(0003_get\.sql\): a `security definer` function that takes the record's id/)
+  assert.match(fix, /alter function public\.get_invoice security invoker;/)
+  assert.doesNotMatch(fix, /Each account should only get its own rows back/, 'the table policy is already owner-only')
+  assert.match(r.read('report.md'), /Not sent again: POST .*\/rest\/v1\/rpc\/get_invoice \(takes arguments Kane did not log\)/)
+})
+
 test('direct links: "links": false keeps the stranger on the list page', async () => {
   const p = project({ options: { links: false } })
   setApi(p)
@@ -845,4 +858,18 @@ test('fix loop: a clean branch needs no agent', async () => {
   const [s, md] = loopResult(p)
   assert.equal(s.agent.ran, false)
   assert.match(md, /Nothing to fix\./)
+})
+
+test('report: rewrites report.md and FIX.md from the last run, with no Kane run and no new history line', async () => {
+  const p = project()
+  setApi(p)
+  await run(p, 'page-leak')
+  const before = calls(p).length
+  writeFileSync(join(p.root, '.stranger', 'FIX.md'), 'stale')
+  const r = await spawnAsync([BIN, 'report'], { cwd: p.root, env: env(p, 'clean') })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /Rewrote .*report\.md and .*FIX\.md from run [0-9a-f]{6} \(LEAK\)/)
+  assert.match(readFileSync(join(p.root, '.stranger', 'FIX.md'), 'utf8'), /# Stranger found a data leak/)
+  assert.equal(calls(p).length, before, 'no Kane run')
+  assert.equal(readFileSync(join(p.root, '.stranger', 'history.jsonl'), 'utf8').trim().split('\n').length, 1)
 })
