@@ -1,0 +1,15 @@
+{
+  "url": "$BENCH_URL",
+  "owner": {
+    "email": "$OWNER_EMAIL",
+    "password": "$OWNER_PASSWORD"
+  },
+  "stranger": {
+    "email": "$STRANGER_EMAIL",
+    "password": "$STRANGER_PASSWORD"
+  },
+  "plant": "click New note, type \"Stranger check\" as the Title and 1 as the Amount, and type the text into the Note field",
+  "look": "the Your notes list",
+  "database": "supabase",
+  "migrations": "../../migrations"
+}

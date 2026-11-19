@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
-import { searchEvidence, restTables, apiRequests, loginHeaders } from './evidence.js'
-import { replayReads, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck } from './api.js'
-import { userTables, livePolicies } from './policies.js'
+import { searchEvidence, restTables, apiRequests, loginHeaders, rpcCalls, storageBuckets, visitedUrls } from './evidence.js'
+import { replayReads, replayRpc, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck, forgeCheck, storageCheck, realtimeCheck } from './api.js'
+import { userTables, livePolicies, readPolicies, functionsIn } from './policies.js'
 
 // The canary and control are random and not secret, so they go into the objective as literal
 // text: Kane's step remarks then quote them, while variables would only show as {{placeholders}}.
@@ -16,12 +16,43 @@ export const OWNER_OBJECTIVE = (where, canary) =>
   `Then ${where.plant}. The text to type is exactly: ${canary} . Save it. ` +
   `Verify that the text "${canary}" is visible on the page.`
 
-export const STRANGER_OBJECTIVE = (where, canary, control) =>
+// "links" are addresses of the owner's own record pages (from the owner's run). The stranger opens each
+// one directly: an app can hide a record from the list and still show it to anyone who has its link.
+export const STRANGER_OBJECTIVE = (where, canary, control, links = []) =>
   `Go to ${where.url}. ` +
   `Log in with the email {{email}} and the password {{password}} using the email form. ` +
   `Then ${where.plant}. The text to type is exactly: ${control} . Save it. ` +
   `Open ${where.look}. Verify that the text "${control}" is visible on the page. ` +
-  `Finally, verify that the text "${canary}" does not appear anywhere on the page.`
+  `${links.length ? 'Then' : 'Finally,'} verify that the text "${canary}" does not appear anywhere on the page.` +
+  links.map((link) => ` Then go directly to ${link} and verify that the text "${canary}" is not shown on that page either.`).join('')
+
+// The owner's record pages worth opening as the stranger: same site, not the start page, and an
+// address that names one record (a long number, a uuid or a long hex id).
+export function recordLinks(urls, start) {
+  let base
+  try {
+    base = new URL(start)
+  } catch {
+    return []
+  }
+  const key = (u) => `${u.origin}${u.pathname.replace(/\/$/, '')}?${[...u.searchParams].filter(([k]) => !k.startsWith('x-vercel')).map(([k, v]) => `${k}=${v}`).join('&')}`
+  const out = []
+  for (const raw of urls) {
+    let u
+    try {
+      u = new URL(raw)
+    } catch {
+      continue
+    }
+    u.hash = ''
+    if (u.origin !== base.origin || key(u) === key(base)) continue
+    const where = decodeURIComponent(u.pathname + u.search)
+    if (!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\/\d{2,}(?:\/|$)|[=/][0-9a-f]{16,}\b|=\d{2,}\b/i.test(where)) continue
+    for (const k of [...u.searchParams.keys()]) if (k.startsWith('x-vercel')) u.searchParams.delete(k)
+    if (!out.includes(u.href)) out.push(u.href)
+  }
+  return out.slice(0, 2)
+}
 
 export function summarize(result) {
   const failed = result.steps.findLast((s) => s.status === 'failed') ?? null
@@ -84,6 +115,7 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
   // With a database URL, the fix brief can also show the policies as they are live, not just as migrated.
   const broken = [...new Set(results.filter((r) => r.verdict !== 'CLEAN' && r.verdict !== 'INCONCLUSIVE').flatMap((r) => r.tables ?? []))]
   const live = cfg.databaseUrl && broken.length ? await livePolicies(cfg, broken) : null
+  const blast = results.flatMap((r) => r.api?.blast ?? [])
 
   const { notStarted, ...headFields } = head
   return {
@@ -95,6 +127,7 @@ export async function check(cfg, { headless = true, onProgress = () => {} } = {}
     stranger: cfg.stranger.email,
     ...headFields,
     why,
+    ...(blast.length ? { blast: mergeBlastRadius(blast) } : {}),
     probes: results.map(({ notStarted, ...r }) => r),
     coverage,
     live,
@@ -137,11 +170,12 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
     return { ...base, verdict: 'INCONCLUSIVE', why, ownerRun: owner, strangerRun: null, evidence: [], anonymous: [], replay: [], tables: [], api: null, findings: [], notStarted }
   }
 
-  onProgress({ phase: 'stranger', canary })
+  const links = cfg.links === false ? [] : recordLinks(visitedUrls(owner.sessionDir), cfg.url)
+  onProgress({ phase: 'stranger', canary, links })
   const strangerResult = await runKane({
     ...common,
     name: `stranger-probe-${tag}`,
-    objective: STRANGER_OBJECTIVE(where, canary, control),
+    objective: STRANGER_OBJECTIVE(where, canary, control, links),
     vars: {
       email: { value: cfg.stranger.email },
       password: { value: cfg.stranger.password, secret: true },
@@ -161,11 +195,11 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
   const tables = [...new Set([...restTables(owner.sessionDir), ...restTables(stranger.sessionDir)])]
   onProgress({ phase: 'stranger-done', evidence, replay, api })
 
-  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, anonymous, replay, tables, api }
+  const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, anonymous, replay, tables, api, links }
   return withApiFindings(cfg, result, readVerdict(cfg, probe, result, strangerResult))
 }
 
-function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evidence, anonymous }, strangerResult) {
+function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evidence, anonymous, links = [] }, strangerResult) {
   const from = (hits) => (hits[0]?.url ? ` from ${hits[0].url.split('?')[0]}` : '')
   const alsoAnon = anonymous.length ? ' With no login at all, the API returns it too.' : ''
   const replayed = evidence.some((h) => h.as === 'stranger')
@@ -188,14 +222,16 @@ function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evide
   const all = said(strangerResult)
   const aboutCanary = failedText.includes(canary) || (!failedText.includes(control) && /canary/i.test(failedText))
   const aboutControl = failedText.includes(control)
+  // The failing check was on one of the owner's record pages, opened directly.
+  const viaLink = links.length > 0 && (/\beither\b/i.test(failedText) || links.some((l) => failedText.includes(l)))
 
   // A replayed read that returns the canary is proof on its own, even when the page check went wrong.
   if (aboutCanary || replayed || (evidence.length && !aboutControl)) {
     return {
       verdict: 'LEAK',
-      seen: aboutCanary ? 'page' : 'network',
+      seen: aboutCanary ? (viaLink ? 'direct-link' : 'page') : 'network',
       why: aboutCanary
-        ? `Signed in as ${cfg.stranger.email}, Kane found the owner's canary on the page.${replayed ? ` The server sends it to the stranger${from(evidence)}.` : ''}${alsoAnon}`
+        ? `Signed in as ${cfg.stranger.email}, Kane found the owner's canary ${viaLink ? `on the owner's own record page, opened directly (${links.join(', ')}), though the list hid it` : 'on the page'}.${replayed ? ` The server sends it to the stranger${from(evidence)}.` : ''}${alsoAnon}`
         : `The server sends the owner's canary to the stranger${from(evidence)}.${alsoAnon}`,
     }
   }
@@ -216,7 +252,7 @@ function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evide
 // The API checks can turn a clean or inconclusive page check into a finding of their own: they are
 // direct proof from the server. Every problem is also listed in "findings" for the report.
 function withApiFindings(cfg, result, verdict) {
-  const { numeric, tamper, personas } = result.api
+  const { numeric, tamper, personas, forge, storage, realtime } = result.api
   const findings = []
   // Only changes the text search can't explain: if the new row's own canary text shows up, the read check covers it.
   const changed = numeric?.ran ? numeric.changed.filter((c) => !c.canary) : []
@@ -236,7 +272,20 @@ function withApiFindings(cfg, result, verdict) {
   }
   if (tamper?.ran && (tamper.edited || tamper.deleted)) {
     const what = [tamper.edited && 'change', tamper.deleted && 'delete'].filter(Boolean).join(' and ')
-    findings.push({ kind: 'TAMPER', text: `The stranger could ${what} the owner's row in \`${tamper.table}\`.${tamper.restored === false ? ' Stranger could not put it back.' : ''}` })
+    findings.push({ kind: 'TAMPER', table: tamper.table, text: `The stranger could ${what} the owner's row in \`${tamper.table}\`.${tamper.restored === false ? ' Stranger could not put it back.' : ''}` })
+  }
+
+  if (forge?.ran && forge.forged) {
+    findings.push({ kind: 'TAMPER', seen: 'forged', table: forge.table, column: forge.column, text: `The stranger could create a row in \`${forge.table}\` that names the owner in \`${forge.column}\`, so anyone can add records to someone else's account.${forge.cleaned ? '' : ' Stranger could not delete it again.'}` })
+  }
+  for (const s of storage ?? []) {
+    const hits = s.ran ? s.tries.filter((t) => t.hit) : []
+    if (hits.length) {
+      findings.push({ kind: 'LEAK', seen: 'storage', bucket: s.bucket, text: `The owner's file in the \`${s.bucket}\` storage bucket: ${hits.map((h) => `${h.as === 'stranger' ? 'the stranger' : 'anyone with no login'} could ${h.kind === 'download' ? 'download it' : 'see it in a listing'}`).join(', ')}.` })
+    }
+  }
+  if (realtime?.ran && realtime.heard.length) {
+    findings.push({ kind: 'LEAK', seen: 'realtime', table: realtime.table, heard: realtime.heard.map((h) => h.kind), text: `Listening to the app's live updates, the stranger received the owner's new row the moment it was saved (${realtime.heard.map((h) => `${h.kind} on \`${h.topic}\``).join(', ')}).` })
   }
 
   let out = { ...result, ...verdict, findings }
@@ -261,23 +310,52 @@ async function apiChecks(cfg, owner, stranger, canary) {
   const list = [...reads.values()]
   const strangerLogin = loginHeaders(stranger.sessionDir)
   const ownerLogin = loginHeaders(owner.sessionDir)
-  const out = { reads: list.length, replay: await replayReads(list, canary, strangerLogin), numeric: null, tamper: null, personas: [], notes: [] }
+  const notes = []
+  const dir = cfg.migrations ? join(cfg.root, cfg.migrations) : null
+  let blast
+  const observe = cfg.blast === false ? undefined : (...args) => {
+    if (notes.length) return
+    try {
+      blast ??= blastRadius(cfg, strangerLogin)
+      blast.observe(...args)
+    } catch {
+      blast = null
+      notes.push('Blast radius could not count the replay responses.')
+    }
+  }
+  const replay = await replayReads(list, canary, strangerLogin, observe)
+  const out = { reads: list.length, replay, numeric: null, tamper: null, personas: [], notes }
+  if (blast) out.blast = blast.entries()
 
-  if (!cfg.numeric && !cfg.tamper && !cfg.personas.length) return out
-  const target = supabaseTarget(list)
+  // Database functions the pages called: only the safe ones (no arguments, cannot write) are sent again.
+  const calls = new Map()
+  for (const [page, run] of [['owner', owner], ['stranger', stranger]]) {
+    for (const c of rpcCalls(run.sessionDir)) calls.set(c.url, calls.has(c.url) ? { ...calls.get(c.url), page: 'both' } : { ...c, page })
+  }
+  if (cfg.rpc !== false && calls.size) out.replay.push(...(await replayRpc([...calls.values()], canary, strangerLogin, functionsIn(dir))))
+
+  const wantsRow = cfg.numeric || cfg.tamper || cfg.forge || cfg.realtime
+  const buckets = cfg.storage ? [...new Set([...(cfg.storageBuckets ?? []), ...storageBuckets(owner.sessionDir), ...storageBuckets(stranger.sessionDir)])] : []
+  if (!wantsRow && !buckets.length && !cfg.personas.length) return out
+  // A page may call only database functions; their address names the Supabase project just as well.
+  const target = supabaseTarget(list) ?? supabaseTarget([...calls.values()])
   if (!target) {
-    out.notes.push('Tamper, numeric and persona checks need a Supabase API in the logs; none was found.')
+    out.notes.push('Tamper, forge, numeric, storage, realtime and persona checks need a Supabase API in the logs; none was found.')
     return out
   }
   if (cfg.personas.length) out.personas = await personaCheck(target, cfg.personas, list, canary)
-  if (!cfg.numeric && !cfg.tamper) return out
+  if (buckets.length && ownerLogin.authorization) out.storage = await storageCheck(target, buckets, ownerLogin, strangerLogin, canary)
+  if (!wantsRow) return out
   const found = ownerLogin.authorization ? await findCanaryRow(target, list, ownerLogin, canary) : null
   if (!found) {
-    out.notes.push("Tamper and numeric checks skipped: the owner's canary row could not be read back through the API.")
+    out.notes.push("Tamper, forge, numeric and realtime checks skipped: the owner's canary row could not be read back through the API.")
     return out
   }
   out.row = { table: found.table, field: found.field }
-  if (cfg.numeric && strangerLogin.authorization) out.numeric = await numericCheck(target, found, list, ownerLogin, strangerLogin, canary)
-  if (cfg.tamper && strangerLogin.authorization) out.tamper = await tamperCheck(target, found, ownerLogin, strangerLogin, canary)
+  if (!strangerLogin.authorization) return out
+  if (cfg.numeric) out.numeric = await numericCheck(target, found, list, ownerLogin, strangerLogin, canary)
+  if (cfg.tamper) out.tamper = await tamperCheck(target, found, ownerLogin, strangerLogin, canary)
+  if (cfg.forge) out.forge = await forgeCheck(target, found, ownerLogin, strangerLogin, canary, readPolicies(dir, found.table).ownerColumn)
+  if (cfg.realtime) out.realtime = await realtimeCheck(target, found, ownerLogin, strangerLogin, canary, cfg.realtimeTopics)
   return out
 }

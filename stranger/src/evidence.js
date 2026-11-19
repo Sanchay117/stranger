@@ -56,15 +56,68 @@ export function apiRequests(sessionDir, limit = 25) {
   return [...out.values()].slice(0, limit)
 }
 
-// The login a session's page used for its data reads (Authorization and cookie headers), so another
-// session's requests can be sent with it. Taken from the last authenticated read in the log.
+// Database functions the page called with POST (supabase-js rpc), with their headers. Kane keeps no
+// request bodies, so only the URL and headers are known.
+export function rpcCalls(sessionDir) {
+  const out = new Map()
+  for (const entry of entries(sessionDir)) {
+    const req = entry.request
+    if (req?.method !== 'POST' || !/\/rest\/v1\/rpc\/[A-Za-z0-9_]+/.test(req.url ?? '')) continue
+    const headers = {}
+    for (const h of req.headers ?? []) if (h?.name && !h.name.startsWith(':')) headers[h.name.toLowerCase()] = h.value
+    if (!headers.apikey) continue
+    out.set(req.url.split('?')[0], { url: req.url.split('?')[0], headers })
+  }
+  return [...out.values()]
+}
+
+// Supabase Storage buckets the page touched (downloads, uploads, listings).
+const STORAGE = /\/storage\/v1\/object\/(?:(?:list|public|authenticated|sign|info|upload\/sign)\/)?([A-Za-z0-9_.-]+)/
+export function storageBuckets(sessionDir) {
+  const buckets = new Set()
+  for (const entry of entries(sessionDir)) {
+    const m = entry.request?.url?.match(STORAGE)
+    if (m) buckets.add(decodeURIComponent(m[1]))
+  }
+  return [...buckets]
+}
+
+// The page addresses a Kane run visited, in order, from the step records in its evidence pack.
+// Single-page apps change the address without loading a page, so the HAR alone would miss them.
+export function visitedUrls(sessionDir) {
+  const seen = []
+  if (!sessionDir || !existsSync(sessionDir)) return seen
+  for (const file of walk(sessionDir, 4)) {
+    if (!ZIP.has(extname(file).toLowerCase())) continue
+    const steps = zipEntries(file).filter((e) => /(^|\/)steps\/[^/]+\/step\.json$/.test(e))
+    const found = []
+    for (const e of steps) {
+      try {
+        const step = JSON.parse(zipRead(file, e))
+        if (typeof step.url === 'string' && /^https?:/.test(step.url)) found.push([step.ordinal ?? 0, step.url])
+      } catch {}
+    }
+    found.sort((a, b) => a[0] - b[0])
+    for (const [, url] of found) if (!seen.includes(url)) seen.push(url)
+  }
+  return seen
+}
+
+// The login a session's page used for its API calls (Authorization and cookie headers), so another
+// session's requests can be sent with it. Taken from the last authenticated API call in the log, of
+// any method: a page may load everything through database functions (POST) and never send a GET.
 export function loginHeaders(sessionDir) {
   let login = {}
-  for (const req of apiRequests(sessionDir, 1000)) {
-    if (req.headers.authorization || req.headers.cookie) {
+  for (const entry of entries(sessionDir)) {
+    const req = entry.request
+    if (!/^https?:/.test(req?.url ?? '') || /\/auth\/v1\//.test(req.url)) continue
+    const headers = {}
+    for (const h of req.headers ?? []) if (h?.name && !h.name.startsWith(':')) headers[h.name.toLowerCase()] = h.value
+    if (!headers.authorization && !headers.apikey) continue
+    if (headers.authorization || headers.cookie) {
       login = {}
-      if (req.headers.authorization) login.authorization = req.headers.authorization
-      if (req.headers.cookie) login.cookie = req.headers.cookie
+      if (headers.authorization) login.authorization = headers.authorization
+      if (headers.cookie) login.cookie = headers.cookie
     }
   }
   return login
@@ -94,7 +147,7 @@ function harHits(where, text, needle) {
   try {
     har = JSON.parse(text)
   } catch {
-    return [{ where, url: null, snippet: around(text, needle) }]
+    return [{ where, url: null, snippet: needle }]
   }
   const seen = new Set()
   const out = []
@@ -104,14 +157,9 @@ function harHits(where, text, needle) {
     const url = entry.request?.url ?? null
     if (seen.has(url)) continue
     seen.add(url)
-    out.push({ where, url, method: entry.request?.method ?? null, status: entry.response?.status ?? null, snippet: around(body, needle) })
+    out.push({ where, url, method: entry.request?.method ?? null, status: entry.response?.status ?? null, snippet: needle })
   }
   return out
-}
-
-export function around(text, needle) {
-  const at = text.indexOf(needle)
-  return text.slice(Math.max(0, at - 160), at + needle.length + 160).replace(/\s+/g, ' ')
 }
 
 function* walk(dir, depth) {

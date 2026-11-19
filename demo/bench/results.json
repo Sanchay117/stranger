@@ -1,0 +1,176 @@
+{
+  "at": "2026-11-19T16:37:22.913Z",
+  "url": "http://localhost:5231",
+  "credits": 588.9999999999999,
+  "cases": [
+    {
+      "id": "rls_off",
+      "at": "2026-11-19T15:58:22.189Z",
+      "verdict": "LEAK",
+      "seen": "page",
+      "findings": [
+        {
+          "kind": "TAMPER",
+          "seen": null
+        },
+        {
+          "kind": "TAMPER",
+          "seen": "forged"
+        }
+      ],
+      "why": "Signed in as stranger@duebook.demo, Kane found the owner's canary on the page. The server sends it to the stranger from https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/bench_rls_off. With no login at all, the API returns it too. The stranger could change and delete the owner's row in `bench_rls_off`. The stranger could create a row in `bench_rls_off` that names the owner in `user_id`, so anyone can add records to someone else's account.",
+      "canary": "stranger-canary-a855b8",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T8FNQR588A1Y78N966RKFB/dashboard/share/US_TH1ORK0ZRZFIIJU5W81L395H3FQLK511EQ0K5N8DGMR6LXNQSVF8BSC2NGSMV4O0?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T8NZKNERXXKA6RHQVVYA8N/dashboard/share/US_BB40D5K3VONJ066GPIE2WU9JJFHMS6AU50NITTJZK57VFUGDL6UKVTY21A81ZCJJ?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 68.7,
+      "seconds": 441,
+      "caught": true
+    },
+    {
+      "id": "client_filter",
+      "at": "2026-11-19T16:05:43.325Z",
+      "verdict": "LEAK",
+      "seen": "network",
+      "findings": [],
+      "why": "The stranger's pages looked clean, but a read from the owner's page, sent with the stranger's login, returns the owner's canary from https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/bench_client_filter.",
+      "canary": "stranger-canary-d8f938",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T8X5JS1A69D9WE93QJ3F9K/dashboard/share/US_IWC1MQ3G8ZOM3JXI45RYOILPIB3VC2YSEFPWD55W6LB1VHQAKQ1YM73V7ZEJ4CIP?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9216CS5AEH4DSQJE7YDE8/dashboard/share/US_OWT1NJN9T1Z8A47BEUY9UCR9NAXNQ2PU68U5ZCX543C7K1IWSZEDG01LS40U1928?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 60.5,
+      "seconds": 401,
+      "caught": true
+    },
+    {
+      "id": "leaky_view",
+      "at": "2026-11-19T16:12:23.963Z",
+      "verdict": "LEAK",
+      "seen": "network",
+      "findings": [],
+      "why": "The stranger's pages looked clean, but a read from the owner's page, sent with the stranger's login, returns the owner's canary from https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/bench_leaky_view_list. With no login at all, the API returns it too.",
+      "canary": "stranger-canary-e4b354",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T99D2FGYRP9N2TM02NX3PR/dashboard/share/US_OAY51RW8XZAYS8BVZIGNHLOV0GC85NN4MXVL9KAYUZTO8E9V3VBRFJSO8ER36J2I?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9F3B0DYMDMHNXJ8VVABYB/dashboard/share/US_CBF88BEURZGV1SM8HH2J2RCC27GYM960AD3E1BUPR0DWWB9VBHRATMNC0S8QCL9J?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 46.7,
+      "seconds": 352,
+      "caught": true
+    },
+    {
+      "id": "leaky_rpc",
+      "at": "2026-11-19T16:18:15.951Z",
+      "verdict": "LEAK",
+      "seen": "anonymous",
+      "findings": [],
+      "why": "The stranger's page was clean, but with no login at all the API returns the owner's canary from https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/rpc/bench_leaky_rpc_mine.",
+      "canary": "stranger-canary-09ac22",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9M3WBABQY4JKM3QBZEQFK/dashboard/share/US_QHV6KM1NMCPFGUF7X0Q6676MJQU0HYGDHM5138RQ7QH2B0DNJUUEQH7D0PNFR23E?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9R0QMH67JNQ2F0V21TS7F/dashboard/share/US_G70SXNVV9CT84483KSX4EL4HIEZ4K69MQYRLHIHH7WQJSU77GOBGBIZRY35XCBR6?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 50,
+      "seconds": 239,
+      "caught": true
+    },
+    {
+      "id": "detail_page",
+      "at": "2026-11-19T15:49:48.383Z",
+      "verdict": "LEAK",
+      "seen": "direct-link",
+      "findings": [],
+      "why": "Signed in as stranger@duebook.demo, Kane found the owner's canary on the owner's own record page, opened directly (http://localhost:5231/bench/?case=detail_page&note=345e95a9-1acb-4db5-bfb5-d5e2ed251281), though the list hid it.",
+      "canary": "stranger-canary-7220a5",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T8011V56C328VC1RD3NNFR/dashboard/share/US_A8S2KC0LRV0MUXU4OIEPFX0ZFMB2EU7F93EJ4XQW1JSZSLHPPYH9TU5PPWBG7MFL?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T85EAGETJ9DG02M1F9XS7X/dashboard/share/US_WWDE90TAK0QDFE0RJ0XMQSJEL9QKC46A8Z6IEDGY20WJS55HMIEPLQLZD40O3JQE?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 86.1,
+      "seconds": 435,
+      "caught": true
+    },
+    {
+      "id": "forged_insert",
+      "at": "2026-11-19T16:22:14.922Z",
+      "verdict": "TAMPER",
+      "seen": "forged",
+      "findings": [
+        {
+          "kind": "TAMPER",
+          "seen": "forged"
+        }
+      ],
+      "why": "The stranger could create a row in `bench_forged_insert` that names the owner in `user_id`, so anyone can add records to someone else's account. (Page check: CLEAN.)",
+      "canary": "stranger-canary-812289",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9VCM9YPYDBFMC5EPPKNRX/dashboard/share/US_5QVXIKREHO7ZS5VEINW43WS3J6IXZ6CN7P90WEANKH8GJBQ9D8F9DO3Y6AFFYJDD?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9Y7YTA3NB34WCZXYQ3GKK/dashboard/share/US_A3MOZMA60CZZT7YR8ZILUQ9JFDI30JFZ0ND6W7LNMZ5TEFUL68ZJ52PANDTH0NC8?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 49.9,
+      "seconds": 229,
+      "caught": true
+    },
+    {
+      "id": "leaky_total",
+      "at": "2026-11-19T16:26:03.690Z",
+      "verdict": "LEAK",
+      "seen": "aggregate",
+      "findings": [
+        {
+          "kind": "LEAK",
+          "seen": "aggregate"
+        }
+      ],
+      "why": "When only the owner added a row (odd number amount_cents = 7331), 1 of the stranger's reads changed: https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/bench_leaky_total_sum. The stranger's data depends on the owner's. (Page check: CLEAN.)",
+      "canary": "stranger-canary-83c7f2",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TA2D8J7AZJGVGXSKDT01MM/dashboard/share/US_N5OI9ZVVL4BR3LR8GV5WQED51Q8GQ8FLUPGEBG3M9MHMKY3X24PTTH4Y988J8EI5?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TA5VKTDN0KBXGMWVTQ0MAT/dashboard/share/US_ZQHUQ9UDC60XJ3TC5V4IGOZW6EKCCQO5SMAZYTYBOVKLYLA927ZLFVQJ3QRJBO0O?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 57.9,
+      "seconds": 250,
+      "caught": true
+    },
+    {
+      "id": "storage_leak",
+      "at": "2026-11-19T16:30:13.714Z",
+      "verdict": "LEAK",
+      "seen": "storage",
+      "findings": [
+        {
+          "kind": "LEAK",
+          "seen": "storage"
+        }
+      ],
+      "why": "The owner's file in the `bench-files` storage bucket: the stranger could download it, the stranger could see it in a listing. (Page check: CLEAN.)",
+      "canary": "stranger-canary-46d442",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TAA0TX7CEV4F7RCKD62BCA/dashboard/share/US_67V5VZQG1UW2N5TNY7D3L566TQ8QXDSXPE597YV3Q9BFEFD0OSC3IA3CF6F3REX7?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TACZWFZV12211TQP06BK3D/dashboard/share/US_6F4IKTUFA2G5KP95WORLKY5B45WCSY3B9N6XGKYGN1UV23M9JXF35PASDYB3V7KD?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 45.9,
+      "seconds": 221,
+      "caught": true
+    },
+    {
+      "id": "broadcast_leak",
+      "at": "2026-11-19T16:33:54.608Z",
+      "verdict": "LEAK",
+      "seen": "realtime",
+      "findings": [
+        {
+          "kind": "LEAK",
+          "seen": "realtime"
+        }
+      ],
+      "why": "Listening to the app's live updates, the stranger received the owner's new row the moment it was saved (broadcast on `bench_broadcast_leak:{owner}`). (Page check: CLEAN.)",
+      "canary": "stranger-canary-ba95e5",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TAGRN0XB730P3BRVX9DDRV/dashboard/share/US_Q4HNU22WQ9KZ13GRZRF01MJFGDV10NZQC718Z3IJR5CVMZRJGWHZMLJBNY74FF2K?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TAKR079PYZ3VK5V243BEZK/dashboard/share/US_WOB2MN6YHU91JFCV8TTFC19EYU5DV3UE1B52U2ZFK67TZIPX6Z4ITFPPR8GEO932?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 45.7,
+      "seconds": 208,
+      "caught": true
+    },
+    {
+      "id": "all_good",
+      "at": "2026-11-19T16:37:22.913Z",
+      "verdict": "CLEAN",
+      "seen": null,
+      "findings": [],
+      "why": "The stranger saw their own data and none of the owner's.",
+      "canary": "stranger-canary-62c1b9",
+      "ownerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TAQ3BSKW00QYJ94SCK3PNJ/dashboard/share/US_T3786HT0IB7B3PDW4G72JX6QCE2587X8O96DEZ8HEAUYZAQ87E1GNOHFRK826QIP?type=summary&agentView=true&fqdn=summary-page",
+      "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TATPPWZBF3ZKM0HFBV0MAD/dashboard/share/US_FS53LVYGHM7C8MRK5NG4Y0X3RQGMS1SEFXE5CJSOYKYLM0F2KHWWEU14B8QK6U3A?type=summary&agentView=true&fqdn=summary-page",
+      "credits": 77.6,
+      "seconds": 300,
+      "caught": true
+    }
+  ]
+}

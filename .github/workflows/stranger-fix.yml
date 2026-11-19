@@ -1,0 +1,182 @@
+# Stranger's fix loop, with no human in it. On a pull request labelled "stranger-fix":
+#   1. the preview database is set to this branch's migrations (scripts/preview-sync.mjs),
+#   2. the app is built from this branch, pointed at the preview database, and served inside the job,
+#   3. Stranger runs Kane CLI on it as the owner and as a stranger,
+#   4. on a finding, Claude Code (headless) gets .stranger/FIX.md with Stranger's Stop hook armed. It writes
+#      a migration and applies it to the preview database; when it stops, the hook runs Stranger again,
+#   5. if Stranger then says CLEAN, this workflow commits the migration to the branch, marks that commit,
+#      and comments before and after (Kane run links, the SQL) on the pull request.
+# The live demo database is never touched. At most two fix-loop commits per branch.
+# Costs about 100 Kane credits per loop (two Stranger runs) plus the agent's Anthropic API usage.
+#
+# Setup (once): a second Supabase project for previews with Duebook's migrations and demo accounts
+# (see README, "Fix loop in CI"). Repository secrets: LT_USERNAME, LT_ACCESS_KEY, OWNER_EMAIL,
+# OWNER_PASSWORD, STRANGER_EMAIL, STRANGER_PASSWORD, ANTHROPIC_API_KEY, PREVIEW_DB_URL,
+# PREVIEW_SUPABASE_URL, PREVIEW_SUPABASE_ANON_KEY. Optional variables: KANE_PROJECT_ID, KANE_FOLDER_ID.
+name: Stranger fix loop
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# One loop at a time: they share the preview database.
+concurrency:
+  group: stranger-preview-db
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  fix:
+    # Only branches of this repository (never forks: the job has secrets and pushes), and only with the label.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'stranger-fix') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'stranger-fix') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      APP_URL: http://localhost:4173/duebook/
+      OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+      OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+      STRANGER_EMAIL: ${{ secrets.STRANGER_EMAIL }}
+      STRANGER_PASSWORD: ${{ secrets.STRANGER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install the app, Kane CLI and Claude Code
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --prefix demo --no-audit --no-fund
+          npm install -g @testmuai/kane-cli @anthropic-ai/claude-code
+
+      - name: Log in to Kane CLI
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+          KANE_PROJECT_ID: ${{ vars.KANE_PROJECT_ID }}
+          KANE_FOLDER_ID: ${{ vars.KANE_FOLDER_ID }}
+        run: |
+          args=(--username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY")
+          [ -n "$KANE_PROJECT_ID" ] && args+=(--project-id "$KANE_PROJECT_ID")
+          [ -n "$KANE_FOLDER_ID" ] && args+=(--folder-id "$KANE_FOLDER_ID")
+          kane-cli login "${args[@]}"
+          kane-cli whoami
+
+      - name: Set the preview database to this branch's migrations
+        env:
+          PREVIEW_DB_URL: ${{ secrets.PREVIEW_DB_URL }}
+        run: node scripts/preview-sync.mjs
+
+      - name: Build this branch's app against the preview database and serve it
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.PREVIEW_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
+        run: |
+          npm run build --prefix demo
+          (cd demo && nohup npx vite preview --port 4173 --strictPort > ../preview.log 2>&1 &)
+          for i in $(seq 1 30); do
+            curl -sf "$APP_URL" > /dev/null && exit 0
+            sleep 1
+          done
+          cat preview.log
+          exit 1
+
+      - name: At most two fix-loop commits per branch
+        id: guard
+        run: |
+          n=$(git log "origin/${{ github.event.pull_request.base.ref }}..HEAD" --grep='^Stranger fix loop:' --oneline | wc -l)
+          echo "commits=$n" >> "$GITHUB_OUTPUT"
+          if [ "$n" -ge 2 ]; then echo "allow=false" >> "$GITHUB_OUTPUT"; else echo "allow=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Stranger, then the coding agent on a finding
+        id: loop
+        env:
+          PREVIEW_DB_URL: ${{ secrets.PREVIEW_DB_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ALLOW_AGENT: ${{ steps.guard.outputs.allow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          node scripts/fix-loop.mjs
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          echo "push=$(node -p "require('./fix-loop.json').push")" >> "$GITHUB_OUTPUT"
+          echo "migrations=$(node -p "require('./fix-loop.json').migrations.join(' ')")" >> "$GITHUB_OUTPUT"
+          echo "before=$(node -p "require('./fix-loop.json').before?.id ?? ''")" >> "$GITHUB_OUTPUT"
+          echo "after=$(node -p "require('./fix-loop.json').after?.id ?? ''")" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the fix to the branch
+        id: push
+        if: steps.loop.outputs.push == 'true'
+        env:
+          MIGRATIONS: ${{ steps.loop.outputs.migrations }}
+          BEFORE: ${{ steps.loop.outputs.before }}
+          AFTER: ${{ steps.loop.outputs.after }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A supabase/migrations .stranger
+          git commit -m "Stranger fix loop: ${MIGRATIONS}" -m "Stranger found a problem on this branch (run ${BEFORE}). The coding agent wrote this migration from .stranger/FIX.md and applied it to the preview database; Stranger's re-run with a fresh canary (${AFTER}) says CLEAN."
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # A push made with this job's token starts no new workflow run, so the fix commit gets its result here.
+      - name: Mark the fix commit CLEAN
+        if: steps.push.outputs.sha != ''
+        uses: actions/github-script@v7
+        env:
+          SHA: ${{ steps.push.outputs.sha }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.SHA,
+              state: 'success',
+              context: 'Stranger',
+              description: 'CLEAN: the fix loop re-ran Stranger on this migration',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            })
+
+      - name: Comment before and after on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            let body = ''
+            try { body = fs.readFileSync('fix-loop.md', 'utf8') } catch {}
+            if (!body) body = `<!-- stranger-fix -->\n### Stranger fix loop\n\nThe loop could not run. See the [workflow log](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
+            const issue = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.pull_request.number }
+            const comments = await github.paginate(github.rest.issues.listComments, issue)
+            const mine = comments.find((c) => c.body?.startsWith('<!-- stranger-fix -->'))
+            if (mine) await github.rest.issues.updateComment({ ...issue, comment_id: mine.id, body })
+            else await github.rest.issues.createComment({ ...issue, body })
+
+      - name: Keep the agent's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stranger-fix-loop
+          path: |
+            fix-loop.json
+            fix-loop.md
+            .stranger/report.md
+            .stranger/runs/agent-*.jsonl
+          if-no-files-found: ignore
+
+      - name: Fail unless Stranger says CLEAN
+        if: steps.loop.outputs.code != '0'
+        run: |
+          echo "Stranger did not end CLEAN (fix-loop exit ${{ steps.loop.outputs.code }})."
+          exit 1

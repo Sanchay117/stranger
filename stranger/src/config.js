@@ -35,6 +35,17 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   // API checks need PostgREST, so they default to on only for Supabase apps.
   cfg.tamper ??= cfg.database === 'supabase'
   cfg.numeric ??= cfg.database === 'supabase'
+  cfg.blast ??= true
+  // Newer API checks, also Supabase only: a stranger forging a row in the owner's name, the owner's files
+  // in storage, live updates (realtime), and database functions the pages called.
+  cfg.forge ??= cfg.database === 'supabase'
+  cfg.storage ??= cfg.database === 'supabase'
+  cfg.realtime ??= cfg.database === 'supabase'
+  cfg.rpc ??= cfg.database === 'supabase'
+  // Open the owner's own record pages directly as the stranger (when the owner's run visited any).
+  cfg.links ??= true
+  cfg.realtimeTopics = Array.isArray(cfg.realtimeTopics) ? cfg.realtimeTopics.map(String) : []
+  cfg.storageBuckets = Array.isArray(cfg.storageBuckets) ? cfg.storageBuckets.map(String) : []
   // Optional: a Postgres URL (read only use) so the fix brief can list the live policies too.
   cfg.databaseUrl = optionalEnv(cfg.databaseUrl)
   cfg.database ??= 'unknown'

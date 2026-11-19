@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
-import { writeReport } from '../src/report.js'
+import { blastRows, renderReport, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
@@ -12,6 +13,7 @@ Usage
   stranger run             Plant a canary as the owner, then look for it as a second account (two Kane CLI runs)
   stranger init            Write a starter stranger.config.json
   stranger install-claude  Add the Stranger skill and Stop hook to this project's .claude/
+  stranger report          Rewrite .stranger/report.md and FIX.md from the last run (no Kane run)
 
 Options
   --config <path>  Config file (default: stranger.config.json)
@@ -73,6 +75,19 @@ if (command === 'install-claude') {
   process.exit(0)
 }
 
+if (command === 'report') {
+  try {
+    const cfg = loadConfig(values.config)
+    const last = JSON.parse(readFileSync(join(cfg.root, '.stranger', 'last.json'), 'utf8'))
+    const files = renderReport(cfg, last)
+    console.log(`Rewrote ${files.report}${files.fix ? ` and ${files.fix}` : ''} from run ${last.id} (${last.verdict}).`)
+    process.exit(0)
+  } catch (err) {
+    console.error(`stranger report: ${err.code === 'ENOENT' ? 'no .stranger/last.json yet: run "stranger run" first' : err.message}`)
+    process.exit(3)
+  }
+}
+
 if (command !== 'run') {
   console.error(HELP)
   process.exit(3)
@@ -96,10 +111,11 @@ const seenSteps = new Set()
 
 const result = await check(cfg, {
   headless: !values.headed,
-  onProgress: ({ phase, event, canary, run, probe, index, total, replay, api }) => {
+  onProgress: ({ phase, event, canary, run, probe, index, total, replay, api, links }) => {
     if (phase === 'owner' && canary && total > 1) say(`\n${bold(`Probe ${index + 1}/${total}: ${probe}`)}`)
     if (phase === 'owner' && canary) say(`\n  ${labels.owner} ${dim(canary)}`)
-    if (phase === 'stranger' && canary) say(`\n  ${labels.stranger}`)
+    if (phase === 'stranger' && canary) say(`\n  ${labels.stranger}${links?.length ? dim(`, then opens the owner's record ${links.length === 1 ? 'page' : 'pages'} directly`) : ''}`)
+    if (phase === 'stranger' && canary) for (const link of links ?? []) say(`    ${dim(`direct link: ${link.slice(0, 100)}`)}`)
     if (event && event.step !== undefined && (event.status === 'failed' || (event.status === 'done' && event.remark))) {
       const key = `${index}:${phase}:${event.step}:${event.status}`
       if (seenSteps.has(key)) return
@@ -108,18 +124,45 @@ const result = await check(cfg, {
       say(`    ${mark} ${dim(String(event.remark ?? `step ${event.step}`).slice(0, 110))}`)
     }
     if (run) say(`    ${dim(`${run.status} in ${run.seconds}s${run.credits != null ? `, ${run.credits} credits` : ''}`)}`)
-    if (phase === 'api') say(`\n  ${dim('API checks: every data read again, as the stranger and with no login, then numeric, tamper and personas')}`)
-    if (replay?.length) {
-      for (const r of replay) {
+    if (phase === 'api') say(`\n  ${dim('API checks: every data read again, as the stranger and with no login, then numeric, tamper, forged owner, files, live updates and personas')}`)
+    if (replay?.length || api) {
+      for (const r of replay ?? []) {
+        if (r.skipped) {
+          say(`    ${yellow('-')} ${dim(`${'not sent'.padEnd(16)}  ${r.method} ${r.url.split('?')[0].slice(0, 70)}: ${r.skipped}`)}`)
+          continue
+        }
         const mark = r.hit ? red('✗') : r.error ? yellow('-') : green('✓')
-        say(`    ${mark} ${dim(`${r.as === 'stranger' ? 'stranger\'s login' : 'no login'.padEnd(16)}  GET ${r.url.split('?')[0].slice(0, 70)} -> ${r.status ?? r.error}${r.hit ? ', owner\'s canary in it' : ''}`)}`)
+        say(`    ${mark} ${dim(`${r.as === 'stranger' ? 'stranger\'s login' : 'no login'.padEnd(16)}  ${(r.method ?? 'GET').padEnd(4)} ${r.url.split('?')[0].slice(0, 70)} -> ${r.status ?? r.error}${r.hit ? ', owner\'s canary in it' : ''}`)}`)
       }
       const n = api?.numeric
       if (n) say(`    ${n.ran && n.changed.some((c) => !c.canary) ? red('✗') : n.ran ? green('✓') : yellow('-')} ${dim(n.ran ? `numeric canary: ${n.changed.some((c) => !c.canary) ? `${n.changed.filter((c) => !c.canary).length} of the stranger's totals or counts moved` : n.changed.length ? "only the new row's own text showed up (the read check covers that)" : 'nothing the stranger reads moved'}` : `numeric canary not run: ${n.why}`)}`)
       const t = api?.tamper
       if (t) say(`    ${t.ran && (t.edited || t.deleted) ? red('✗') : t.ran ? green('✓') : yellow('-')} ${dim(t.ran ? `tamper: change ${t.edited ? 'went through' : 'blocked'}, delete ${t.deleted ? 'went through' : 'blocked'}` : `tamper not run: ${t.why}`)}`)
+      const f = api?.forge
+      if (f) say(`    ${f.ran && f.forged ? red('✗') : f.ran ? green('✓') : yellow('-')} ${dim(f.ran ? `forged owner: a row in the owner's name ${f.forged ? 'was stored' : 'was refused'} (HTTP ${f.status ?? '?'})` : `forged owner not run: ${f.why}`)}`)
+      for (const b of api?.storage ?? []) {
+        const got = b.ran ? b.tries.filter((t) => t.hit) : []
+        say(`    ${!b.ran ? yellow('-') : got.length ? red('✗') : green('✓')} ${dim(b.ran ? `files in ${b.bucket}: ${got.length ? got.map((t) => `${t.as === 'stranger' ? 'stranger' : 'no login'} could ${t.kind}`).join(', ') : 'stranger and no login blocked'}` : `files in ${b.bucket} not checked: ${b.why}`)}`)
+      }
+      const rt = api?.realtime
+      if (rt) say(`    ${rt.ran && rt.heard.length ? red('✗') : rt.ran ? green('✓') : yellow('-')} ${dim(rt.ran ? `live updates: ${rt.heard.length ? `heard the owner's row (${rt.heard.map((h) => `${h.kind} on ${h.topic}`).join(', ')})` : `heard nothing on ${rt.joined.length} channels`}` : `live updates not checked: ${rt.why}`)}`)
       for (const x of api?.personas ?? []) say(`    ${!x.ran ? yellow('-') : x.ok ? green('✓') : red('✗')} ${dim(x.ran ? `${x.name} (should ${x.expect}): ${x.sees ? 'sees' : 'does not see'} the canary` : `${x.name}: ${x.why}`)}`)
       for (const note of api?.notes ?? []) say(`    ${yellow('-')} ${dim(note)}`)
+    }
+    if (api?.blast?.length) {
+      say(`\n  ${bold('Blast radius')}`)
+      const width = Math.max(...api.blast.map(({ table }) => table.length))
+      const indent = ' '.repeat(width + 6)
+      for (const { table, stranger, anonymous, sensitive } of api.blast) {
+        const exposed = stranger?.othersRows > 0 || anonymous?.othersRows > 0
+        const paint = exposed ? red : dim
+        say(paint(`    ${table.padEnd(width)}  stranger reads ${blastRows(stranger, true)}`))
+        say(paint(`${indent}with no login ${blastRows(anonymous)}`))
+        if (exposed && sensitive.length) {
+          const more = sensitive.length > 3 ? ` (+${sensitive.length - 3} more)` : ''
+          say(paint(`${indent}exposed: ${sensitive.slice(0, 3).join(', ')}${more}`))
+        }
+      }
     }
   },
 })
@@ -138,6 +181,7 @@ if (values.json) {
       strangerRun: result.strangerRun?.testUrl ?? null,
       findings: result.findings?.map((f) => f.kind) ?? [],
       ...(result.coverage ? { coverage: `${result.coverage.probed.length}/${result.coverage.tables.length}` } : {}),
+      ...(result.blast?.length ? { blast: result.blast.map(({ table, stranger, anonymous, sensitive }) => ({ table, stranger, anonymous, sensitive })) } : {}),
       ...(result.probes.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),
     }) + '\n',
   )

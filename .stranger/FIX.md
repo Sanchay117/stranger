@@ -1,13 +1,15 @@
 # Stranger found a data leak
 
+Impact: `invoices`: stranger reads 12 rows from 1 other account (20 rows with no login).
+
 Owner: **maya@duebook.demo**. Stranger: **stranger@duebook.demo**.
 
-- Canary the owner planted: `stranger-canary-6541c9`
+- Canary the owner planted: `stranger-canary-e7689f`
 - How it showed up: on the page
 - **No login needed:** the API returned it to a request with no login (only the public key), so anyone on the internet can read these rows.
 - Response that carried it: https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/invoices (table `invoices`)
-- Kane's failing check: assert: the text "stranger-canary-6541c9" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MHJE5WGRK8K5XFDJCW2MNV/dashboard/share/US_51GRF5CKCP9UZQ07964RHK0DTEAF9K8AOTYHPHTQ7WE66F5ZT63Z9T74Z2KVF4BJ?type=summary&agentView=true&fqdn=summary-page
+- Kane's failing check: assert: the text "stranger-canary-e7689f" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MWXC72Z55BXNDY9AAAJQRN/dashboard/share/US_S70OVX9C4QCE6EJDN7WY3T69U0HIZ8AQYBGE7K2YQSDCTC656GQS77RX3UNRC63G?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
@@ -33,7 +35,7 @@ Live in the database right now (row level security on):
 
 - `"Enable read access for all users"` for select to public: `using (true)` **open to everyone**
 - `"Users can delete their own invoices"` for delete to authenticated: `using ((( SELECT auth.uid() AS uid) = user_id))`
-- `"Users can insert their own invoices"` for insert to authenticated: `using ()`
+- `"Users can insert their own invoices"` for insert to authenticated
 - `"Users can update their own invoices"` for update to authenticated: `using ((( SELECT auth.uid() AS uid) = user_id))`
 
 Do not fix this by filtering rows in the page or the client code. The data still reaches the browser, and anyone can call the API directly.

@@ -37,11 +37,12 @@ export function readPolicies(dir, table) {
           command: (rest.match(/\bfor\s+(all|select|insert|update|delete)\b/i)?.[1] ?? 'all').toLowerCase(),
           roles: rest.match(/\bto\s+([\w\s,]+?)(?=\s+(?:using|with)\b|$)/i)?.[1].trim() ?? 'public',
           using: clause(rest, 'using'),
+          check: clause(rest, 'with\\s+check'),
         })
       }
     }
   }
-  out.all = [...policies.values()].map((p) => ({ ...p, open: isOpen(p.using) }))
+  out.all = [...policies.values()].map((p) => ({ ...p, open: isOpen(p.using), checkOpen: isOpen(p.check) }))
   out.select = out.all.filter((p) => p.command === 'select' || p.command === 'all')
   return out
 }
@@ -98,7 +99,7 @@ function isOpen(using) {
 }
 
 function clause(text, word) {
-  const at = text.search(new RegExp(`\\b${word}\\s*\\(`, 'i'))
+  const at = word ? text.search(new RegExp(`\\b${word}\\s*\\(`, 'i')) : text.indexOf('(')
   if (at < 0) return null
   const start = text.indexOf('(', at)
   let depth = 0
@@ -109,14 +110,67 @@ function clause(text, word) {
   return null
 }
 
-// Statements without comments. Good enough for policy DDL; it does not try to parse function bodies.
+// Statements without comments, split on semicolons outside dollar-quoted function bodies ($$ ... $$).
 function statements(sql) {
-  return sql
-    .replace(/--[^\n]*/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(';')
-    .map((s) => s.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
+  const text = sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  const out = []
+  let start = 0
+  let quote = null
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '$') {
+      const tag = text.slice(i).match(/^\$[A-Za-z_]*\$/)?.[0]
+      if (tag && (quote === null || tag === quote)) {
+        quote = quote === null ? tag : null
+        i += tag.length - 1
+        continue
+      }
+    }
+    if (text[i] === ';' && quote === null) {
+      out.push(text.slice(start, i))
+      start = i + 1
+    }
+  }
+  out.push(text.slice(start))
+  return out.map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+}
+
+// Database functions the migrations create: whether they take arguments, may write (volatile, the
+// default) and skip row level security (security definer). Stranger only calls again functions
+// that cannot write and need no arguments.
+export function functionsIn(dir) {
+  const out = new Map()
+  if (!dir || !existsSync(dir)) return out
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    for (const sql of statements(readFileSync(join(dir, file), 'utf8'))) {
+      const m = sql.match(/^create\s+(?:or\s+replace\s+)?function\s+([^\s(]+)\s*\(/i)
+      if (!m) continue
+      const args = clause(sql.slice(m.index + m[0].length - 1), '') ?? ''
+      const head = sql.replace(/\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$/g, ' ').toLowerCase()
+      out.set(tableOf(m[1]), {
+        args: args.trim().length > 0,
+        volatile: !/\b(stable|immutable)\b/.test(head),
+        definer: /\bsecurity\s+definer\b/.test(head),
+        file,
+      })
+    }
+  }
+  return out
+}
+
+// Views the migrations create, and whether they run with the caller's rights (security_invoker).
+// A view without it reads its tables as its creator, so row level security does not apply.
+export function viewsIn(dir) {
+  const out = new Map()
+  if (!dir || !existsSync(dir)) return out
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    for (const sql of statements(readFileSync(join(dir, file), 'utf8'))) {
+      const m = sql.match(/^create\s+(?:or\s+replace\s+)?view\s+([^\s(]+)([\s\S]*?)\bas\b/i)
+      if (m) out.set(tableOf(m[1]), { invoker: /security_invoker\s*=\s*(true|on)/i.test(m[2]), file })
+      const alter = sql.match(/^alter\s+view\s+([^\s]+)\s+set\s*\(([^)]*)\)/i)
+      if (alter && out.has(tableOf(alter[1]))) out.get(tableOf(alter[1])).invoker = /security_invoker\s*=\s*(true|on)/i.test(alter[2])
+    }
+  }
+  return out
 }
 
 const unquote = (name) => name.replace(/^"|"$/g, '')

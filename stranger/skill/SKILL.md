@@ -21,10 +21,17 @@ It takes a few minutes and prints one JSON line: `verdict`, `why`, `canary`, `re
 
 - **CLEAN**: say so, with the canary id and the Kane run link. Do not claim more than this check covers.
 - **LEAK**: read `.stranger/FIX.md` and `.stranger/report.md`. If the brief says **No login needed**, anyone on the internet can read the rows, so say that plainly to the user. Fix it where the data lives:
+  - The FIX.md impact line shows how much the sampled reads exposed. Confirm the measured blast radius drops to zero when you re-run the check.
   - write a new migration (never edit an applied one) that limits the leaking table's SELECT policy to the owner, and check UPDATE and DELETE too. The brief names the open policy from the migrations when it can; with several probes it lists each leaking one, so fix every table it names;
   - apply it with the project's migration command;
   - run Stranger again. It plants a fresh canary every time. Repeat until CLEAN, at most three times, then stop and explain what you found.
-- **TAMPER**: the stranger could change or delete the owner's row. FIX.md lists the UPDATE and DELETE policies; make them owner-only in a new migration, then re-run.
+- **TAMPER**: the stranger could change or delete the owner's row. FIX.md lists the UPDATE and DELETE policies; make them owner-only in a new migration, then re-run. If it says the stranger could add a row in the owner's name (forged owner), the INSERT policy needs `with check ((select auth.uid()) = <owner column>)`.
+- The brief says where the leak came from, and the fix follows from that:
+  - **a database function** (`/rest/v1/rpc/...`): make it `security invoker`, or filter by `auth.uid()` inside it. The table's own policies may already be right.
+  - **a view**: `alter view ... set (security_invoker = true)`. A view has no policies of its own.
+  - **the record's own page, opened by its address**: whatever loads one record by id skips the owner check (often a `security definer` function). Fix that check, not the link.
+  - **files**: keep the bucket private, store files under `<user id>/`, and limit the `storage.objects` read policy to `(storage.foldername(name))[1] = (select auth.uid())::text`.
+  - **live updates**: send on a private channel (`realtime.send(..., true)`, and `{ config: { private: true } }` in the client) with a policy on `realtime.messages` that lets each user join only their own topic.
 - **OVERLOCKED**: an account that should see the owner's rows (a teammate persona) can't, usually after a fix that went too far. Add the sharing rule FIX.md suggests rather than reopening the table.
 - **INCONCLUSIVE**: Kane could not finish (login, a wrong `plant` or `look` hint in the config, out of credits). Read the report and fix the setup. Never treat it as clean.
 
