@@ -125,4 +125,8 @@ writeFileSync(
     '',
   ].join('\n'),
 )
+// The same line at the top of the main README's bench section.
+const readme = join(root, 'README.md')
+const score = `**Stranger caught ${found.length} of ${bugs.length} bugs${control.every((r) => r?.caught) ? ' and stayed quiet on the clean control' : ''}**, in ${cases.length} real Kane CLI runs (${new Date(results.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}).`
+writeFileSync(readme, readFileSync(readme, 'utf8').replace(/<!-- bench-score -->[\s\S]*?<!-- \/bench-score -->/, `<!-- bench-score -->${score}<!-- /bench-score -->`))
 console.log(`\nStranger caught ${found.length} of ${bugs.length} bugs. ${Math.round(results.credits)} credits. Scorecard: bench/README.md and /bench/`)
