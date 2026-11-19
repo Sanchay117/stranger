@@ -631,7 +631,8 @@ test('coverage: a user-data table no probe reaches is listed as not checked', as
 })
 
 const OPEN_INSERT = LEAKY.replace(/with check \(\(select auth\.uid\(\)\) = user_id\);\n\ncreate policy "Users can update/, 'with check (true);\n\ncreate policy "Users can update')
-const owned = (p) => api.rows.filter((r) => String(r.note).includes('-f') || String(r.note).includes('-r'))
+// Rows Stranger added itself (forged "-f", live-update "-r"), which must be gone after a run.
+const owned = (p) => api.rows.filter((r) => /^stranger-canary-[0-9a-f]+-[fr]$/.test(String(r.note)))
 const objectives = (p) => readFileSync(join(p.kane, 'objectives.log'), 'utf8')
 
 test('forged owner: the stranger can add a row in the owner\'s name, and the brief asks for a "with check"', async () => {

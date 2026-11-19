@@ -332,9 +332,11 @@ function fix(cfg, r) {
     ]
   }
 
+  const views = viewsIn(cfg.migrations ? join(cfg.root, cfg.migrations) : null)
   const perTable = (t) => {
     const lines = []
-    if (readLeak || persona) lines.push(...hint(cfg, t), '')
+    // A view has no policies of its own: its fix is security_invoker (in "extra" below).
+    if ((readLeak || persona) && !views.has(t)) lines.push(...hint(cfg, t), '')
     if (aggregate) {
       lines.push(
         "Something the stranger reads adds up or counts rows without checking who is asking: usually a view or a database function. In Postgres a view runs with its creator's rights unless it is made with `with (security_invoker = true)`, and a `security definer` function skips row level security too. Make them respect the caller, or filter by `auth.uid()` inside.",
@@ -375,7 +377,10 @@ function fix(cfg, r) {
         ]
       : []),
     ...(rpcs.length ? rpcHint(dir, rpcs) : []),
-    ...known.flatMap((t) => (viewsIn(dir).get(t)?.invoker === false ? viewHint(viewsIn(dir).get(t), t) : [])),
+    // Views that leak rows (a read of them carried the canary) or totals (a read of them moved).
+    ...[...new Set([...known, ...failing.flatMap((p) => (p.api?.numeric?.changed ?? []).map((c) => c.url.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1]))])]
+      .filter((t) => views.get(t)?.invoker === false)
+      .flatMap((t) => viewHint(views.get(t), t)),
     ...(files.length ? storageHint(dir, [...new Set(files.map((f) => f.bucket))]) : []),
     ...(broadcast.length ? broadcastHint(broadcast[0].table ?? known[0]) : []),
   ]
