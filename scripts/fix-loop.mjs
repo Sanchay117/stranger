@@ -90,8 +90,9 @@ if (before && FAILING.has(before.verdict) && process.env.ALLOW_AGENT !== 'false'
       '--output-format',
       'stream-json',
       '--verbose',
-      '--max-turns',
-      '40',
+      // A spending cap for the agent's API usage (AGENT_BUDGET_USD, default 5 dollars).
+      '--max-budget-usd',
+      process.env.AGENT_BUDGET_USD || '5',
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
