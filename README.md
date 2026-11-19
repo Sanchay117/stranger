@@ -157,7 +157,7 @@ The live demo database is never touched, and a branch gets at most two fix-loop 
 
 Setup, once:
 
-1. Create a second Supabase project for previews. Apply the migrations and create the demo accounts there: `SUPABASE_DB_URL=<preview db url> node scripts/db-apply.mjs`, then `node scripts/seed.mjs` with that project's `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the environment.
+1. Create a second Supabase project for previews. Put its `PREVIEW_DB_URL`, `PREVIEW_SUPABASE_URL` and `PREVIEW_SERVICE_ROLE_KEY` in `.env` and run `npm run preview:setup`: it applies the migrations and creates the demo accounts there, and refuses to run against the live project.
 2. Add repository secrets: `LT_USERNAME`, `LT_ACCESS_KEY`, `OWNER_EMAIL`, `OWNER_PASSWORD`, `STRANGER_EMAIL`, `STRANGER_PASSWORD`, `ANTHROPIC_API_KEY`, and the preview project's `PREVIEW_DB_URL`, `PREVIEW_SUPABASE_URL` and `PREVIEW_SUPABASE_ANON_KEY`.
 3. Create the `stranger-fix` label.
 

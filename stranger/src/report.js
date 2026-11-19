@@ -78,8 +78,6 @@ export function blastRows(counts, withAccounts = false) {
 export function writeReport(cfg, result) {
   const dir = join(cfg.root, '.stranger')
   mkdirSync(dir, { recursive: true })
-  const fixPath = join(dir, 'FIX.md')
-  const reportPath = join(dir, 'report.md')
 
   writeFileSync(join(result.runDir, 'result.json'), JSON.stringify(result, null, 2) + '\n')
   writeFileSync(join(dir, 'last.json'), JSON.stringify(result, null, 2) + '\n')
@@ -99,6 +97,16 @@ export function writeReport(cfg, result) {
       ...(result.blast?.length ? { blast: result.blast.map(({ table, stranger, anonymous }) => ({ table, stranger, anonymous })) } : {}),
     }) + '\n',
   )
+  return renderReport(cfg, result)
+}
+
+// report.md and FIX.md from a result, with no new Kane run and no history line. "stranger report"
+// uses it to rewrite both from .stranger/last.json after Stranger itself was updated.
+export function renderReport(cfg, result) {
+  const dir = join(cfg.root, '.stranger')
+  mkdirSync(dir, { recursive: true })
+  const fixPath = join(dir, 'FIX.md')
+  const reportPath = join(dir, 'report.md')
   writeFileSync(reportPath, tidy(report(cfg, result)))
 
   const failing = FAILING.has(result.verdict)
@@ -300,8 +308,12 @@ function fix(cfg, r) {
   const findings = failing.flatMap((p) => p.findings ?? [])
   const rpcs = [...new Set(failing.flatMap(rpcNames))]
   const viaTable = (p) => hits(p).some((h) => h.url && !/\/rest\/v1\/rpc\//.test(h.url))
+  // A record page that loads by id through a security definer function: the likely culprit, even though
+  // Stranger never calls a function that takes arguments itself.
+  const fns = functionsIn(cfg.migrations ? join(cfg.root, cfg.migrations) : null)
+  const loaders = (p) => [...new Set((p.replay ?? []).filter((r) => r.skipped).map((r) => r.url.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/)?.[1]).filter((n) => n && fns.get(n)?.definer))]
   const readLeak =
-    failing.some((p) => p.verdict === 'LEAK' && READ_SEEN.has(p.seen) && (viaTable(p) || !rpcNames(p).length)) ||
+    failing.some((p) => p.verdict === 'LEAK' && READ_SEEN.has(p.seen) && (viaTable(p) || !rpcNames(p).length) && !(p.seen === 'direct-link' && loaders(p).length)) ||
     failing.some(viaTable) ||
     findings.some((f) => f.seen === 'realtime' && f.heard?.includes('database changes'))
   const directLink = failing.filter((p) => p.seen === 'direct-link')
@@ -370,12 +382,7 @@ function fix(cfg, r) {
   const liveNote = r.live?.error ? [`(Live policies not shown: ${r.live.error}.)`, ''] : []
   const dir = cfg.migrations ? join(cfg.root, cfg.migrations) : null
   const extra = [
-    ...(directLink.length
-      ? [
-          `The list page hid the owner's record, but its own page (${directLink.flatMap((p) => p.links ?? []).join(', ')}) showed it to the stranger. Whatever loads one record by its id does not check who is asking. Fix that check on the server, in the policy or function the record page reads, not by hiding the link.`,
-          '',
-        ]
-      : []),
+    ...(directLink.length ? linkHint(directLink, [...new Set(directLink.flatMap(loaders))], fns) : []),
     ...(rpcs.length ? rpcHint(dir, rpcs) : []),
     // Views that leak rows (a read of them carried the canary) or totals (a read of them moved).
     ...[...new Set([...known, ...failing.flatMap((p) => (p.api?.numeric?.changed ?? []).map((c) => c.url.match(/\/rest\/v1\/([A-Za-z0-9_]+)/)?.[1]))])]
@@ -448,6 +455,25 @@ function insertHint(cfg, t, column) {
     '  for insert to authenticated',
     `  with check ((select auth.uid()) = ${col});`,
     '```',
+  ]
+}
+
+function linkHint(probes, suspects, fns) {
+  const pages = probes.flatMap((p) => p.links ?? []).join(', ')
+  const lines = [`The list page hid the owner's record, but its own page (${pages}) showed it to the stranger. Whatever loads one record by its id does not check who is asking.`]
+  if (!suspects.length) return [...lines.map((l) => `${l} Fix that check on the server, in the policy or function the record page reads, not by hiding the link.`), '']
+  return [
+    ...lines,
+    '',
+    `The pages called ${suspects.map((n) => `\`${n}()\` (${fns.get(n).file})`).join(', ')}: a \`security definer\` function that takes the record's id. It reads the table with its creator's rights, so row level security never applies, and it is the likely loader of that page. (Stranger never calls a function that takes arguments itself, so this is where to look, not a second proof.) The table's own read policy may be fine.`,
+    '',
+    'Make it run with the caller\'s rights, or check the owner inside it, in a new migration:',
+    '',
+    '```sql',
+    ...suspects.map((n) => `alter function public.${n} security invoker;`),
+    '-- or keep it security definer and add  and user_id = (select auth.uid())  to its where clause',
+    '```',
+    '',
   ]
 }
 

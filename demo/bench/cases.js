@@ -23,8 +23,8 @@ export const CASES = [
     read: 'mine',
     title: 'Filtered in the page only',
     bug: 'The page asks only for its own rows, but the read policy lets any signed-in account read all of them.',
-    expect: { verdict: 'LEAK', seen: ['network'] },
-    check: "The owner's own page read, sent again with the stranger's login",
+    expect: { verdict: 'LEAK', seen: ['network', 'anonymous'] },
+    check: "The owner's own page read, sent again with the stranger's login (or none)",
   },
   {
     id: 'leaky_view',
@@ -33,8 +33,8 @@ export const CASES = [
     read: 'view',
     title: 'View without security_invoker',
     bug: 'The table is locked down, but the page reads a view that runs with its creator\'s rights, so row level security never applies.',
-    expect: { verdict: 'LEAK', seen: ['network'] },
-    check: "The owner's read of the view, sent again with the stranger's login",
+    expect: { verdict: 'LEAK', seen: ['network', 'anonymous'] },
+    check: "The owner's read of the view, sent again with the stranger's login (or none)",
   },
   {
     id: 'leaky_rpc',
@@ -43,8 +43,8 @@ export const CASES = [
     read: 'rpc',
     title: 'Database function returns everyone\'s rows',
     bug: '"My notes" comes from a security definer function that forgets to filter by the caller. The page hides the rest.',
-    expect: { verdict: 'LEAK', seen: ['network'] },
-    check: "The function call, sent again with the stranger's login",
+    expect: { verdict: 'LEAK', seen: ['network', 'anonymous'] },
+    check: "The function call, sent again with the stranger's login (or none)",
   },
   {
     id: 'detail_page',

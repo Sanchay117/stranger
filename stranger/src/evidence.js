@@ -103,15 +103,21 @@ export function visitedUrls(sessionDir) {
   return seen
 }
 
-// The login a session's page used for its data reads (Authorization and cookie headers), so another
-// session's requests can be sent with it. Taken from the last authenticated read in the log.
+// The login a session's page used for its API calls (Authorization and cookie headers), so another
+// session's requests can be sent with it. Taken from the last authenticated API call in the log, of
+// any method: a page may load everything through database functions (POST) and never send a GET.
 export function loginHeaders(sessionDir) {
   let login = {}
-  for (const req of apiRequests(sessionDir, 1000)) {
-    if (req.headers.authorization || req.headers.cookie) {
+  for (const entry of entries(sessionDir)) {
+    const req = entry.request
+    if (!/^https?:/.test(req?.url ?? '') || /\/auth\/v1\//.test(req.url)) continue
+    const headers = {}
+    for (const h of req.headers ?? []) if (h?.name && !h.name.startsWith(':')) headers[h.name.toLowerCase()] = h.value
+    if (!headers.authorization && !headers.apikey) continue
+    if (headers.authorization || headers.cookie) {
       login = {}
-      if (req.headers.authorization) login.authorization = req.headers.authorization
-      if (req.headers.cookie) login.cookie = req.headers.cookie
+      if (headers.authorization) login.authorization = headers.authorization
+      if (headers.cookie) login.cookie = headers.cookie
     }
   }
   return login
