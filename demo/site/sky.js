@@ -8,7 +8,12 @@
 const root = document.documentElement
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches
 const isNight = () => (root.dataset.theme === 'dark' ? 1 : 0)
-const onTheme = (fn) => new MutationObserver(fn).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+const onTheme = (fn) => {
+  const mo = new MutationObserver(fn)
+  mo.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+  return mo
+}
+const drop = (gl) => gl.getExtension('WEBGL_lose_context')?.loseContext()
 
 const VERT = 'attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }'
 const NOISE = `
@@ -109,12 +114,16 @@ const SKY = `
     gl_FragColor = vec4(col, 1.0);
   }`
 
-export function sky(canvas, frame, copy, hole) {
-  if (!canvas || !frame) return
+// Returns a function that stops it. With { still: true } it draws one frame (and again on resize or theme).
+export function sky(canvas, frame, copy, hole, opts = {}) {
+  const none = () => {}
+  if (!canvas || !frame) return none
   const gl = canvas.getContext('webgl', { alpha: false, antialias: false, powerPreference: 'low-power' })
-  if (!gl) return
+  if (!gl) return none
   const u = program(gl, SKY)
-  if (!u) return
+  if (!u) return none
+  const calm = still || !!opts.still
+  let stopped = false
 
   const box = (el) => {
     const f = frame.getBoundingClientRect()
@@ -122,7 +131,8 @@ export function sky(canvas, frame, copy, hole) {
     return { x0: (r.left - f.left) / f.width, x1: (r.right - f.left) / f.width, y0: 1 - (r.bottom - f.top) / f.height, y1: 1 - (r.top - f.top) / f.height }
   }
   let text = [0, 0, 0, 0]
-  let tear = [0.7, 0.5, 0.2, 0.25]
+  // With no tear, the ring of cloud around it sits far off the canvas.
+  let tear = [-9, -9, 0.1, 0.1]
   function measure() {
     // Below full resolution on purpose: clouds are soft, and this keeps laptops cool.
     const dpr = Math.min(devicePixelRatio || 1, 2)
@@ -144,33 +154,33 @@ export function sky(canvas, frame, copy, hole) {
     }
   }
   measure()
-  new ResizeObserver(() => {
+  const ro = new ResizeObserver(() => {
     measure()
-    if (still) draw(performance.now())
-  }).observe(frame)
+    if (calm) draw(performance.now())
+  })
+  ro.observe(frame)
 
   const mouse = [0, 0]
   const target = [0, 0]
-  addEventListener(
-    'pointermove',
-    (e) => {
-      target[0] = e.clientX / innerWidth - 0.5
-      target[1] = 0.5 - e.clientY / innerHeight
-    },
-    { passive: true },
-  )
+  const point = (e) => {
+    target[0] = e.clientX / innerWidth - 0.5
+    target[1] = 0.5 - e.clientY / innerHeight
+  }
+  addEventListener('pointermove', point, { passive: true })
 
   let visible = true
-  new IntersectionObserver(([e]) => (visible = e.isIntersecting)).observe(frame)
+  const io = new IntersectionObserver(([e]) => (visible = e.isIntersecting))
+  io.observe(frame)
   let night = isNight()
   const start = performance.now()
 
   function draw(now) {
-    night += (isNight() - night) * (still ? 1 : 0.12)
+    if (stopped) return
+    night += (isNight() - night) * (calm ? 1 : 0.12)
     mouse[0] += (target[0] - mouse[0]) * 0.04
     mouse[1] += (target[1] - mouse[1]) * 0.04
     gl.uniform2f(u('uRes'), canvas.width, canvas.height)
-    gl.uniform1f(u('uTime'), still ? 30 : 30 + (now - start) / 1000)
+    gl.uniform1f(u('uTime'), calm ? 30 : 30 + (now - start) / 1000)
     gl.uniform1f(u('uNight'), night)
     gl.uniform2f(u('uMouse'), mouse[0], mouse[1])
     gl.uniform4f(u('uText'), ...text)
@@ -179,16 +189,26 @@ export function sky(canvas, frame, copy, hole) {
   }
   // Clouds drift slowly, so 30 frames a second is plenty.
   let odd = false
+  let mo = null
   function frameLoop(now) {
+    if (stopped) return
     odd = !odd
     if (odd && visible && !document.hidden) draw(now)
     requestAnimationFrame(frameLoop)
   }
-  if (still) {
+  if (calm) {
     draw(performance.now())
-    onTheme(() => requestAnimationFrame(draw))
+    mo = onTheme(() => requestAnimationFrame(draw))
   } else {
     requestAnimationFrame(frameLoop)
+  }
+  return () => {
+    stopped = true
+    ro.disconnect()
+    io.disconnect()
+    mo?.disconnect()
+    removeEventListener('pointermove', point)
+    // The context stays with its canvas (a lost one could not be reused if the same canvas mounts again).
   }
 }
 
@@ -263,13 +283,15 @@ const HALFTONE = `
     gl_FragColor = vec4(mix(bg, ink, dotv * (0.3 + 0.7 * d)), 1.0);
   }`
 
+// Returns a function that stops it.
 export function art(canvases) {
-  if (!canvases.length) return
+  const none = () => {}
+  if (!canvases.length) return none
   const glc = document.createElement('canvas')
   const gl = glc.getContext('webgl', { preserveDrawingBuffer: true, antialias: false })
-  if (!gl) return
+  if (!gl) return none
   const u = program(gl, HALFTONE)
-  if (!u) return
+  if (!u) return none
 
   function paint(c) {
     const dpr = Math.min(devicePixelRatio || 1, 2)
@@ -299,5 +321,10 @@ export function art(canvases) {
     }
   })
   canvases.forEach((c) => ro.observe(c))
-  onTheme(() => canvases.forEach(paint))
+  const mo = onTheme(() => canvases.forEach(paint))
+  return () => {
+    ro.disconnect()
+    mo.disconnect()
+    drop(gl)
+  }
 }
