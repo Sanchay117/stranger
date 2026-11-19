@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 
 // Run folders hold Kane's working files, which include the test accounts' passwords in plain text.
-const IGNORE = ['.stranger/runs/', '.stranger/armed', '.stranger/hook-state.json', '.stranger/last.json', '.testmuai/']
+const IGNORE = ['.stranger/runs/', '.stranger/armed', '.stranger/hook-state.json', '.stranger/last.json', '.testmuai/', '.stranger/guards/kane/output-*/']
 
 // Adds any missing lines to .gitignore, only inside a git repo. Returns what it added.
 export function ensureGitignore(root) {

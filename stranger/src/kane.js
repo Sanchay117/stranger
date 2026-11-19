@@ -5,14 +5,58 @@ import { tmpdir } from 'node:os'
 
 // Runs one Kane CLI objective in agent mode and collects its NDJSON stream.
 // vars: { name: { value, secret? } }. Secrets go through a 0600 temp file, never argv.
-export function runKane({ objective, url, vars, name, timeout = 420, headless = true, cwd, logFile, onEvent }) {
+export async function runKane({ objective, url, vars, name, timeout = 420, headless = true, cwd, logFile, onEvent }) {
   const dir = mkdtempSync(join(tmpdir(), 'stranger-'))
   const varsFile = join(dir, 'vars.json')
   writeFileSync(varsFile, JSON.stringify(vars), { mode: 0o600 })
 
   const args = ['run', objective, '--agent', '--url', url, '--variables-file', varsFile, '--timeout', String(timeout), '--name', name]
   if (headless) args.push('--headless')
+  try {
+    const r = await spawnKane(args, { cwd, logFile, onEvent })
+    return { ...r, steps: r.events.filter((e) => e.step !== undefined), end: r.events.findLast((e) => kind(e) === 'run_end') ?? null }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
+// Runs Kane test files (*_test.md) as one execution with kane-cli testrun: one sealed evidence pack,
+// judged by a verdict policy. Recorded tests replay without the LLM; Kane authors any that are new.
+// Each member's own events come on stdout too (--stream-members), so failed checks can be read.
+export async function runKaneSuite({ cwd, paths, policy, headless = true, startUrl, timeout, logFile, onEvent }) {
+  const args = ['testrun', 'run', ...paths, '--agent', '--stream-members']
+  if (policy) args.push('--policy', policy)
+  if (headless) args.push('--headless')
+  if (startUrl) args.push('--override-start-url', startUrl)
+  const r = await spawnKane(args, { cwd, logFile, onEvent, timeout })
+  const done = r.events.findLast((e) => kind(e) === 'testrun_done') ?? null
+  const failures = []
+  let credits = 0
+  let testUrl = null
+  for (const e of r.events) {
+    const inner = e.event && typeof e.event === 'object' ? e.event : e.data && typeof e.data === 'object' ? e.data : e
+    const member = [e.member, e.member_key, e.log_path, inner.member, inner.path, inner.test].find((x) => typeof x === 'string') ?? null
+    if (typeof inner.credits_consumed === 'number') credits += inner.credits_consumed
+    testUrl = inner.test_url ?? e.test_url ?? testUrl
+    if (['failed', 'broken', 'fail', 'error'].includes(inner.status ?? inner.outcome)) {
+      const text = [inner.remark, inner.reason, inner.one_liner, inner.summary, inner.message, inner.error].filter((x) => typeof x === 'string').join(' ')
+      failures.push({ member, text })
+    }
+  }
+  return {
+    ...r,
+    done,
+    failures,
+    credits: credits || null,
+    testUrl: done?.test_url ?? testUrl,
+    pack: done?.evidence ?? done?.evidence_path ?? done?.pack ?? null,
+    policy: done?.verdicts ?? done?.verdict ?? null,
+    reason: done?.reason ?? r.spawnError ?? (r.exitCode ? r.stderrTail.trim().split('\n').at(-1) : null),
+  }
+}
+
+// Starts kane-cli with stdin closed (so it never waits for an answer) and collects its NDJSON stream.
+function spawnKane(args, { cwd, logFile, onEvent, timeout }) {
   return new Promise((resolvePromise) => {
     const started = Date.now()
     const child = spawn(process.env.KANE_CLI_BIN || 'kane-cli', args, {
@@ -20,6 +64,7 @@ export function runKane({ objective, url, vars, name, timeout = 420, headless = 
       env: { ...process.env, KANE_CLI_USER_AGENT: 'stranger' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    const timer = timeout ? setTimeout(() => child.kill('SIGTERM'), timeout * 1000) : null
     const events = []
     const raw = []
     let stderr = ''
@@ -47,18 +92,18 @@ export function runKane({ objective, url, vars, name, timeout = 420, headless = 
       if (stderr.length > 200_000) stderr = stderr.slice(-100_000)
     })
 
+    let finished = false
     const finish = (exitCode, spawnError) => {
-      rmSync(dir, { recursive: true, force: true })
+      if (finished) return
+      finished = true
+      if (timer) clearTimeout(timer)
       if (buffer.trim()) raw.push(buffer.trim())
       if (logFile) writeFileSync(logFile, raw.join('\n') + '\n')
-      const end = events.findLast((e) => kind(e) === 'run_end') ?? null
       resolvePromise({
         exitCode,
         spawnError: spawnError?.message ?? null,
         seconds: Math.round((Date.now() - started) / 1000),
         events,
-        steps: events.filter((e) => e.step !== undefined),
-        end,
         stderrTail: stderr.split('\n').slice(-15).join('\n'),
       })
     }

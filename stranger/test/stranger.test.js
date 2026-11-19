@@ -882,3 +882,131 @@ test('report: rewrites report.md and FIX.md from the last run, with no Kane run 
   assert.equal(calls(p).length, before, 'no Kane run')
   assert.equal(readFileSync(join(p.root, '.stranger', 'history.jsonl'), 'utf8').trim().split('\n').length, 1)
 })
+
+// ---------- Leak guards ----------
+const ACCOUNTS = { 'maya@duebook.demo': { password: PASSWORD, user: 'owner' }, 'stranger@duebook.demo': { password: PASSWORD, user: 'stranger' } }
+
+async function guard(p, args = [], modes = 'clean', extra = {}) {
+  const r = await spawnAsync([BIN, 'guard', '--json', ...args], { cwd: p.root, env: env(p, modes, { SUPABASE_URL: API, SUPABASE_ANON_KEY: 'public-anon-key', ...extra }) })
+  let out = null
+  try {
+    out = JSON.parse(r.stdout.trim().split('\n').at(-1))
+  } catch {}
+  return { code: r.status, out, stderr: r.stderr }
+}
+const guardsFile = (p) => JSON.parse(readFileSync(join(p.root, '.stranger', 'guards.json'), 'utf8'))
+
+test('guards: account ids in a leaking read become {owner} and {stranger}, and the public key is dropped', async () => {
+  const { guardPath } = await import('../src/guards.js')
+  assert.equal(guardPath('https://x.supabase.co/rest/v1/invoices?apikey=k&select=*&user_id=eq.0b7c-11aa', { owner: '0b7c-11aa' }), '/rest/v1/invoices?select=*&user_id=eq.{owner}')
+  assert.equal(guardPath('https://x.supabase.co/rest/v1/rpc/my_invoices', {}), '/rest/v1/rpc/my_invoices')
+  assert.equal(guardPath('https://x.supabase.co/storage/v1/object/public/a/b', {}), null)
+})
+
+test('guards: a leak Kane found becomes a guard that says BROKEN while open, HOLDS once fixed, and reopens if it comes back', async () => {
+  const p = project()
+  setApi(p, { stranger: 'all', anon: 'all', accounts: ACCOUNTS })
+  const none = await guard(p)
+  assert.equal(none.code, 0)
+  assert.equal(none.out.verdict, 'NONE')
+
+  const r = await run(p, 'page-leak')
+  assert.equal(r.out.verdict, 'LEAK')
+  assert.deepEqual(r.out.guards, { added: 1, reopened: 0, kane: 1 })
+  const file = readFileSync(join(p.root, '.stranger', 'guards.json'), 'utf8')
+  const [g] = guardsFile(p).guards
+  assert.equal(g.path, '/rest/v1/invoices?select=*&order=created_at.desc')
+  assert.deepEqual(g.logins.sort(), ['anonymous', 'stranger'])
+  assert.equal(g.state, 'open')
+  for (const secret of [PASSWORD, 'Bearer', 'public-anon-key', 'Synthetic HAR Client']) assert.ok(!file.includes(secret), `guards.json holds ${secret}`)
+
+  const open = await guard(p)
+  assert.equal(open.code, 1)
+  assert.equal(open.out.verdict, 'BROKEN')
+  const tries = Object.fromEntries(open.out.guards[0].tries.map((t) => [t.as, t.ownerRows]))
+  assert.deepEqual(tries, { stranger: 1, anonymous: 1 })
+  assert.ok(!JSON.stringify(open.out).includes('stranger-canary-'), 'row values must not be printed')
+
+  Object.assign(api, { stranger: 'own', anon: 'refuse' })
+  const fixed = await guard(p)
+  assert.equal(fixed.code, 0)
+  assert.equal(fixed.out.verdict, 'HOLDS')
+  assert.equal(guardsFile(p).guards[0].state, 'fixed')
+
+  api.stranger = 'all'
+  const back = await guard(p)
+  assert.equal(back.code, 1)
+  assert.equal(guardsFile(p).guards[0].state, 'open')
+  assert.ok(guardsFile(p).guards[0].reopened)
+})
+
+test('guards: an owner with no rows of their own cannot be compared, so the guard cannot tell', async () => {
+  const p = project()
+  setApi(p, { stranger: 'all', anon: 'refuse', accounts: ACCOUNTS })
+  await run(p, 'page-leak')
+  api.rows = api.rows.filter((row) => row.user_id !== 'owner')
+  const r = await guard(p)
+  assert.equal(r.code, 2)
+  assert.equal(r.out.guards[0].status, 'UNKNOWN')
+})
+
+test('guards: --record turns an older run into guards with no Kane run', async () => {
+  const p = project({ options: { guards: false } })
+  setApi(p, { stranger: 'all', anon: 'all', accounts: ACCOUNTS })
+  await run(p, 'page-leak')
+  assert.ok(!existsSync(join(p.root, '.stranger', 'guards.json')))
+  const before = calls(p).length
+  const r = await guard(p, ['--record'])
+  assert.equal(r.out.verdict, 'BROKEN')
+  assert.equal(guardsFile(p).guards.length, 1)
+  assert.equal(calls(p).length, before, 'no Kane run')
+})
+
+test('Kane guards: replayed with kane-cli testrun and a verdict policy; logins stay off argv and off disk; planted rows are deleted', async () => {
+  const p = project()
+  setApi(p, { stranger: 'all', anon: 'refuse', accounts: ACCOUNTS })
+  await run(p, 'page-leak')
+  const dir = join(p.root, '.stranger', 'guards', 'kane')
+  const test = readFileSync(join(dir, 'main_test.md'), 'utf8')
+  assert.match(test, /^---\nmode: testing\nurl: http:\/\/localhost:5231\/duebook\//)
+  assert.match(test, /\{\{owner_password\}\}/)
+  assert.ok(!test.includes(PASSWORD))
+  const { canary } = guardsFile(p).kane[0]
+
+  Object.assign(api, { stranger: 'own' })
+  const ok = await guard(p, ['--kane'], 'clean')
+  assert.equal(ok.code, 0, ok.stderr)
+  assert.equal(ok.out.kane.results[0].status, 'HOLDS')
+  const args = readFileSync(join(p.kane, 'testrun-args.log'), 'utf8')
+  for (const flag of ['testrun run main_test.md', '--agent', '--stream-members', '--policy stranger-guard.policy.yaml', '--override-start-url http://localhost:5231/duebook/']) assert.ok(args.includes(flag), `missing ${flag}`)
+  assert.ok(existsSync(join(dir, 'stranger-guard.policy.yaml')))
+  assert.ok(!existsSync(join(dir, '.testmuai', 'variables', 'stranger-guard.json')), 'the logins file is deleted after the run')
+  assert.ok(!api.rows.some((row) => row.note === canary), "the guard's canary row is deleted again")
+  assert.equal(guardsFile(p).kane[0].state, 'fixed')
+
+  const broke = await guard(p, ['--kane'], 'page-leak')
+  assert.equal(broke.code, 1)
+  assert.equal(broke.out.kane.results[0].status, 'BROKEN')
+
+  const unsure = await guard(p, ['--kane'], 'control-missing')
+  assert.equal(unsure.out.kane.results[0].status, 'UNKNOWN')
+
+  const careless = await spawnAsync([BIN, 'guard', '--kane'], { cwd: p.root, env: env(p, 'clean', { SUPABASE_URL: API, SUPABASE_ANON_KEY: 'public-anon-key', FAKE_KANE_LEAK_SECRET: '1' }) })
+  assert.match(careless.stderr, /recordings hold a password/)
+})
+
+test('fix loop: once the fix holds, the leak guards run on the fixed database and the comment says so', async () => {
+  const p = project()
+  setApi(p, { stranger: 'all', anon: 'all', accounts: ACCOUNTS })
+  // The stand-in database stops leaking the moment the agent's migration lands.
+  const fix = join(p.root, 'migrations', '0002_fix.sql')
+  const watch = setInterval(() => existsSync(fix) && Object.assign(api, { stranger: 'own', anon: 'refuse' }), 10)
+  const r = await loop(p, 'page-leak', { SUPABASE_URL: API, SUPABASE_ANON_KEY: 'public-anon-key' })
+  clearInterval(watch)
+  assert.equal(r.status, 0, r.stderr)
+  const [s, md] = loopResult(p)
+  assert.equal(s.after.verdict, 'CLEAN')
+  assert.deepEqual(s.guards, { verdict: 'HOLDS', total: 1, holds: 1, broken: 0 })
+  assert.match(md, /\*\*Leak guards: ✅ 1 of 1 hold\.\*\*/)
+  assert.equal(guardsFile(p).guards[0].state, 'fixed')
+})

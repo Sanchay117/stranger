@@ -34,6 +34,49 @@ if (process.env.FAKE_KANE_FORBID && args.some((a) => a.includes(process.env.FAKE
   console.error('fake-kane: a secret was passed on the command line')
   process.exit(9)
 }
+// kane-cli testrun run <files...>: Stranger's guard tests. Logins come from Kane's variables folder in the
+// working directory. Each test plants its canary as the owner (planted.txt) and passes or fails by mode.
+// FAKE_KANE_LEAK_SECRET=1 writes a password into the recordings, as a careless recorder might.
+if (args[0] === 'testrun') {
+  const files = args.slice(2, args.findIndex((a, i) => i > 1 && a.startsWith('--')))
+  const pool = JSON.parse(readFileSync(join(process.cwd(), '.testmuai', 'variables', 'stranger-guard.json'), 'utf8'))
+  if (!pool.owner_password?.secret || !pool.stranger_password?.secret) {
+    console.error('fake-kane: a password was not marked secret')
+    process.exit(9)
+  }
+  const mode = (process.env.FAKE_KANE_MODES ?? 'clean').split(',')[0]
+  appendFileSync(join(out, 'calls.log'), `testrun ${files.join(' ')} ${mode}\n`)
+  appendFileSync(join(out, 'testrun-args.log'), args.join(' ') + '\n')
+  emit({ type: 'stream_start' })
+  emit({ type: 'testrun_plan', members: files })
+  let failed = false
+  for (const file of files) {
+    const text = readFileSync(join(process.cwd(), file), 'utf8')
+    const canary = text.match(/stranger-guard-[0-9a-f]{6}/)[0]
+    const control = text.match(/stranger-own-[0-9a-f]{6}/)[0]
+    appendFileSync(join(out, 'planted.txt'), `${canary}\n`)
+    const stem = file.replace(/_test\.md$/, '')
+    mkdirSync(join(process.cwd(), `output-${stem}`, '.internal'), { recursive: true })
+    writeFileSync(join(process.cwd(), `output-${stem}`, 'Result.md'), `---\ntest: ${stem}\nstatus: done\n---\n`)
+    writeFileSync(join(process.cwd(), `output-${stem}`, '.internal', 'steps.json'), JSON.stringify({ typed: process.env.FAKE_KANE_LEAK_SECRET ? pool.owner_password.value : '{{owner_password}}' }))
+    emit({ type: 'testrun_member_start', member: file })
+    emit({ type: 'testrun_member_event', member: file, event: { step: 1, status: 'done', remark: `type: ${canary} into Note` } })
+    let status = 'passed'
+    if (mode === 'page-leak') {
+      emit({ type: 'testrun_member_event', member: file, event: { step: 9, status: 'failed', remark: `assert: the text "${canary}" does not appear anywhere on the page` } })
+      status = 'failed'
+    } else if (mode === 'control-missing') {
+      emit({ type: 'testrun_member_event', member: file, event: { step: 8, status: 'failed', remark: `assert: the text "${control}" is visible on the page` } })
+      status = 'failed'
+    }
+    failed ||= status !== 'passed'
+    emit({ type: 'testrun_member_end', member: file, status, credits_consumed: 0.25 })
+  }
+  emit({ type: 'testrun_summary', passed: failed ? 0 : files.length, failed: failed ? files.length : 0 })
+  emit({ type: 'testrun_done', status: failed ? 'failed' : 'passed', test_url: 'https://kane.example/testrun/1' })
+  process.exit(failed ? 1 : 0)
+}
+
 const vars = JSON.parse(readFileSync(flag('--variables-file'), 'utf8'))
 if (!vars.password?.secret) {
   console.error('fake-kane: password was not marked secret')

@@ -8,8 +8,11 @@
 // 3. Writes fix-loop.json (for the workflow) and fix-loop.md (the pull request comment) in the root.
 //
 // The workflow, not the agent, commits and pushes, and only migrations and Stranger's tracked files.
+// 4. Once Stranger says CLEAN, runs the leak guards (.stranger/guards.json) against the preview database:
+//    the reads that leaked before, sent again with fresh logins. No Kane run.
 // Env: APP_URL (required), PREVIEW_DB_URL (the agent's db:apply goes there), OWNER_* and STRANGER_*,
-// ANTHROPIC_API_KEY, ALLOW_AGENT, CLAUDE_BIN (default "claude"), RUN_URL (link to the CI run).
+// SUPABASE_URL and SUPABASE_ANON_KEY (the preview project, for the guards), ANTHROPIC_API_KEY,
+// ALLOW_AGENT, CLAUDE_BIN (default "claude"), RUN_URL (link to the CI run).
 // Usage: node scripts/fix-loop.mjs [--root <dir>]
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -120,6 +123,18 @@ if (before && FAILING.has(before.verdict) && process.env.ALLOW_AGENT !== 'false'
   summary.push = summary.final === 'CLEAN' && summary.migrations.length > 0
 }
 
+// The leaks Kane found before, on main or here: are they closed on this branch's database too?
+if (summary.final === 'CLEAN' && existsSync(join(root, '.stranger', 'guards.json'))) {
+  const g = await run(process.execPath, [STRANGER, 'guard', '--json'])
+  try {
+    const out = JSON.parse(g.out.trim().split('\n').at(-1))
+    const count = (status) => out.guards.filter((x) => x.status === status).length
+    summary.guards = { verdict: out.verdict, total: out.guards.length, holds: count('HOLDS'), broken: count('BROKEN') }
+  } catch {
+    summary.guards = { verdict: 'UNKNOWN', total: 0, holds: 0, broken: 0 }
+  }
+}
+
 writeFileSync(join(root, 'fix-loop.json'), JSON.stringify(summary, null, 2) + '\n')
 writeFileSync(join(root, 'fix-loop.md'), comment(summary))
 console.log(`\nFix loop: ${summary.before?.verdict ?? 'no result'}${summary.after ? ` -> ${summary.after.verdict}` : ''}${summary.migrations.length ? `, new migration ${summary.migrations.join(', ')}` : ''}`)
@@ -144,6 +159,15 @@ function comment(s) {
     if (s.agent.said) out.push(`<details><summary>What the agent said when it stopped</summary>\n\n${s.agent.said.split('\n').map((l) => `> ${l}`).join('\n')}\n</details>`, '')
     out.push(s.after ? line("After (the Stop hook's re-run, fresh canary)", s.after) : '**After:** Stranger did not run again (the agent stopped without changing a watched file).', '')
     out.push(s.push ? 'The migration is committed to this branch by the workflow.' : 'Nothing was committed: Stranger did not say CLEAN, so a person should look.')
+  }
+  if (s.guards?.total) {
+    const g = s.guards
+    out.push(
+      '',
+      g.verdict === 'HOLDS'
+        ? `**Leak guards: ✅ ${g.holds} of ${g.total} hold.** The reads that leaked before, sent again as the stranger and with no login, return none of the owner's rows. (\`stranger guard\`, no Kane run.)`
+        : `**Leak guards: ${g.broken ? '🚨' : '❔'} ${g.holds} of ${g.total} hold${g.broken ? `, ${g.broken} broken` : ''}.** (\`stranger guard\`, no Kane run.)`,
+    )
   }
   if (process.env.RUN_URL) out.push('', `[Workflow run](${process.env.RUN_URL})`)
   return out.join('\n') + '\n'

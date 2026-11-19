@@ -3,8 +3,9 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
 import { searchEvidence, restTables, apiRequests, loginHeaders, rpcCalls, storageBuckets, visitedUrls } from './evidence.js'
-import { replayReads, replayRpc, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, numericCheck, tamperCheck, personaCheck, forgeCheck, storageCheck, realtimeCheck } from './api.js'
+import { replayReads, replayRpc, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, subjectOf, numericCheck, tamperCheck, personaCheck, forgeCheck, storageCheck, realtimeCheck } from './api.js'
 import { userTables, livePolicies, readPolicies, functionsIn } from './policies.js'
+import { guardCandidates } from './guards.js'
 
 // The canary and control are random and not secret, so they go into the objective as literal
 // text: Kane's step remarks then quote them, while variables would only show as {{placeholders}}.
@@ -333,6 +334,8 @@ async function apiChecks(cfg, owner, stranger, canary) {
     for (const c of rpcCalls(run.sessionDir)) calls.set(c.url, calls.has(c.url) ? { ...calls.get(c.url), page: 'both' } : { ...c, page })
   }
   if (cfg.rpc !== false && calls.size) out.replay.push(...(await replayRpc([...calls.values()], canary, strangerLogin, functionsIn(dir))))
+  // The reads that leaked, kept as guards (account ids swapped for {owner} and {stranger}).
+  out.guards = guardCandidates(out.replay, { owner: subjectOf(ownerLogin), stranger: subjectOf(strangerLogin) })
 
   const wantsRow = cfg.numeric || cfg.tamper || cfg.forge || cfg.realtime
   const buckets = cfg.storage ? [...new Set([...(cfg.storageBuckets ?? []), ...storageBuckets(owner.sessionDir), ...storageBuckets(stranger.sessionDir)])] : []
