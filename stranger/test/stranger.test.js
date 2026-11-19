@@ -17,6 +17,8 @@ const repo = join(here, '..', '..')
 const BIN = join(here, '..', 'bin', 'stranger.js')
 const HOOK = join(here, '..', 'hooks', 'claude-stop.js')
 const FAKE = join(here, 'fake-kane.js')
+const FAKE_CLAUDE = join(here, 'fake-claude.js')
+const FIX_LOOP = join(repo, 'scripts', 'fix-loop.mjs')
 const PASSWORD = 'not-a-real-password-7731'
 const token = (user) => `test.${Buffer.from(JSON.stringify({ sub: user })).toString('base64url')}.signature`
 
@@ -787,4 +789,60 @@ test('direct links: only same-site addresses that name one record, never the sta
     ),
     ['https://app.example/duebook/invoice/123e4567-e89b-12d3-a456-426614174000', 'https://app.example/duebook/?id=4521'],
   )
+})
+
+const loop = (p, modes, extra = {}) =>
+  spawnAsync([FIX_LOOP, '--root', p.root], {
+    cwd: p.root,
+    env: { ...env(p, modes), APP_URL: 'http://localhost:5231/duebook/', CLAUDE_BIN: FAKE_CLAUDE, FAKE_CLAUDE_HOOK: HOOK, FAKE_CLAUDE_SQL: FIXED, ...extra },
+  })
+const loopResult = (p) => [JSON.parse(readFileSync(join(p.root, 'fix-loop.json'), 'utf8')), readFileSync(join(p.root, 'fix-loop.md'), 'utf8')]
+
+test('fix loop: LEAK, the agent writes a migration, the hook re-runs Stranger and it says CLEAN', async () => {
+  const p = project()
+  setApi(p)
+  const r = await loop(p, 'page-leak')
+  assert.equal(r.status, 0, r.stderr)
+  const [s, md] = loopResult(p)
+  assert.equal(s.before.verdict, 'LEAK')
+  assert.equal(s.after.verdict, 'CLEAN')
+  assert.notEqual(s.after.canary, s.before.canary, 'the re-run plants a fresh canary')
+  assert.deepEqual(s.migrations, ['0002_fix.sql'])
+  assert.equal(s.push, true)
+  assert.match(md, /^<!-- stranger-fix -->/)
+  assert.match(md, /\*\*Before: 🚨 LEAK\*\*[\s\S]*It wrote <code>migrations\/0002_fix\.sql<\/code>[\s\S]*create policy "Users can read their own invoices"[\s\S]*\*\*After \(the Stop hook's re-run, fresh canary\): ✅ CLEAN\*\*/)
+  assert.equal(existsSync(join(p.root, '.stranger', 'armed')), false, 'the hook is disarmed afterwards')
+  assert.deepEqual(calls(p), ['owner 1 page-leak', 'stranger 1 page-leak', 'owner 1 clean', 'stranger 1 clean'])
+})
+
+test('fix loop: a fix that does not hold is not pushed, and the loop fails', async () => {
+  const p = project()
+  setApi(p)
+  const r = await loop(p, 'page-leak', { FAKE_CLAUDE_KANE_MODES: 'page-leak' })
+  assert.equal(r.status, 1)
+  const [s, md] = loopResult(p)
+  assert.equal(s.after.verdict, 'LEAK')
+  assert.equal(s.push, false)
+  assert.match(md, /Nothing was committed: Stranger did not say CLEAN/)
+})
+
+test('fix loop: with the agent off (ALLOW_AGENT=false) it only checks', async () => {
+  const p = project()
+  setApi(p)
+  const r = await loop(p, 'page-leak', { ALLOW_AGENT: 'false' })
+  assert.equal(r.status, 1)
+  const [s, md] = loopResult(p)
+  assert.equal(s.agent.ran, false)
+  assert.equal(existsSync(join(p.root, 'migrations', '0002_fix.sql')), false)
+  assert.match(md, /The coding agent did not run/)
+})
+
+test('fix loop: a clean branch needs no agent', async () => {
+  const p = project()
+  setApi(p)
+  const r = await loop(p, 'clean')
+  assert.equal(r.status, 0)
+  const [s, md] = loopResult(p)
+  assert.equal(s.agent.ran, false)
+  assert.match(md, /Nothing to fix\./)
 })
