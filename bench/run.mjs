@@ -1,5 +1,6 @@
 // Runs Stranger (real Kane CLI, about 50 credits a case) on every bench case and writes the scorecard.
 // Usage: node --env-file=.env bench/run.mjs [--url http://localhost:5231] [--only detail_page,all_good] [--no-reset]
+//        node bench/run.mjs --score-only   (no Kane runs: rebuild the scorecard from demo/bench/results.json)
 //
 // Each case gets its own folder, bench/cases/<case>/, with a stranger.config.json and the usual
 // .stranger/ output (report.md, FIX.md and history.jsonl are tracked as proof). Before the first case,
@@ -11,10 +12,10 @@ import { parseArgs } from 'node:util'
 import { CASES, LIMITS, caught } from '../demo/bench/cases.js'
 
 const root = new URL('..', import.meta.url).pathname
-const { values } = parseArgs({ options: { url: { type: 'string', default: 'http://localhost:5231' }, only: { type: 'string' }, 'no-reset': { type: 'boolean', default: false } } })
+const { values } = parseArgs({ options: { url: { type: 'string' }, only: { type: 'string' }, 'no-reset': { type: 'boolean', default: false }, 'score-only': { type: 'boolean', default: false } } })
 const only = values.only ? new Set(values.only.split(',')) : null
-const picked = CASES.filter((c) => !only || only.has(c.id))
-if (!picked.length) {
+const picked = values['score-only'] ? [] : CASES.filter((c) => !only || only.has(c.id))
+if (!picked.length && !values['score-only']) {
   console.error(`No such case. Cases: ${CASES.map((c) => c.id).join(', ')}`)
   process.exit(3)
 }
@@ -29,14 +30,16 @@ const CONFIG = (c) => ({
   migrations: '../../migrations',
 })
 
-if (!values['no-reset']) {
+if (!values['no-reset'] && picked.length) {
   const r = spawnSync(process.execPath, [join(root, 'scripts', 'bench-apply.mjs')], { stdio: 'inherit', env: process.env })
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
 
 const resultsFile = join(root, 'demo', 'bench', 'results.json')
 const previous = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, 'utf8')) : { cases: [] }
-const kept = new Map((previous.cases ?? []).map((r) => [r.id, r]))
+// Older results are re-judged with the current expectations in cases.js.
+const kept = new Map((previous.cases ?? []).map((r) => [r.id, { ...r, caught: caught(CASES.find((c) => c.id === r.id) ?? { expect: { verdict: '', seen: [] } }, r) }]))
+values.url ??= previous.url ?? 'http://localhost:5231'
 
 for (const c of picked) {
   const dir = join(root, 'bench', 'cases', c.id)
@@ -82,7 +85,7 @@ for (const c of picked) {
 }
 
 const cases = CASES.map((c) => kept.get(c.id)).filter(Boolean)
-const results = { at: new Date().toISOString(), url: values.url, credits: cases.reduce((s, r) => s + r.credits, 0), cases }
+const results = { at: cases.map((r) => r.at).filter(Boolean).sort().at(-1) ?? new Date().toISOString(), url: values.url, credits: cases.reduce((s, r) => s + r.credits, 0), cases }
 writeFileSync(resultsFile, JSON.stringify(results, null, 2) + '\n')
 
 // The scorecard in the repo, the same numbers as the /bench/ page.
