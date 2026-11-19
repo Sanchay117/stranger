@@ -459,7 +459,7 @@ export async function realtimeCheck(target, found, ownerLogin, strangerLogin, ca
     table,
     topics: names.map(shown),
     joined: [...joined].map(shown),
-    heard: [...heard].map(([topic, kind]) => ({ topic: shown(topic), kind })),
+    heard: [...heard].map(([topic, kind]) => ({ topic: topic === changes ? table : shown(topic), kind })),
     cleaned: !!del?.ok,
   }
 }

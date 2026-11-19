@@ -5,10 +5,12 @@ import { createServer } from 'node:http'
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readPolicies } from '../src/policies.js'
+import { recordLinks } from '../src/check.js'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const repo = join(here, '..', '..')
@@ -56,6 +58,10 @@ function project({ probes, personas, migrations = [['0001_invoices.sql', LEAKY]]
 //   totals:    'own' | 'all'              what /rest/v1/totals adds up (an aggregate)
 //   teammates: accounts that may also read the owner's rows
 //   accounts:  { email: { password, user } } for sign-in
+//   insert:    'own' | 'any'              whether a new row may name another account as its owner
+//   rpc:       'own' | 'all'              what POST /rest/v1/rpc/<any> returns
+//   files:     'private' | 'shared' | 'public'  who may download a stored file
+//   realtime:  null | 'private' | 'broadcast' | 'changes'  the live-updates socket (null: no socket)
 // Rows: the owner's canaries (from the stand-in Kane's planted.txt) and one row of the stranger's.
 const api = {}
 let server
@@ -90,7 +96,10 @@ before(async () => {
     const payload = auth?.match(/^Bearer test\.([A-Za-z0-9_-]+)\.signature$/)?.[1]
     const who = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).sub : null
     if (auth && !who) return json(401, { message: 'bad token' })
+    if (url.pathname.startsWith('/storage/v1/object/')) return storage(req, url, who, body, json, res)
     if (!who && api.anon === 'refuse') return json(401, { message: 'no' })
+    const fn = url.pathname.match(/^\/rest\/v1\/rpc\/(\w+)/)?.[1]
+    if (fn) return json(200, api.rows.filter((r) => api.rpc === 'all' || r.user_id === who))
     const table = url.pathname.match(/^\/rest\/v1\/(\w+)/)?.[1]
     const canRead = (r) => (who ? api.stranger === 'all' || r.user_id === who || (r.user_id === 'owner' && api.teammates.includes(who)) : api.anon === 'all')
     if (table === 'totals') {
@@ -112,9 +121,10 @@ before(async () => {
     const writable = api.rows.filter((r) => match(r) && (api.write === 'all' || r.user_id === who))
     if (req.method === 'POST') {
       const row = JSON.parse(body)
-      if (row.user_id && row.user_id !== who) return json(403, { message: 'new row violates row-level security policy' })
-      const added = { ...row, id: row.id ?? api.nextId++, user_id: who }
+      if (row.user_id && row.user_id !== who && api.insert !== 'any') return json(403, { message: 'new row violates row-level security policy' })
+      const added = { ...row, id: row.id ?? api.nextId++, user_id: row.user_id ?? who }
       api.rows.push(added)
+      liveInsert(added)
       return json(201, [added])
     }
     if (req.method === 'PATCH') {
@@ -127,14 +137,96 @@ before(async () => {
     }
     json(405, {})
   })
+  server.on('upgrade', liveSocket)
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   API = `http://127.0.0.1:${server.address().port}`
 })
-after(() => server.close())
+after(() => {
+  for (const c of sockets) c.socket.destroy()
+  server.close()
+})
 
-function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {}, rows = [], responseLimit = Infinity, exactCount = false } = {}) {
+// Stand-in Supabase Storage: upload, download (signed in or public), list and delete.
+function storage(req, url, who, body, json, res) {
+  const parts = url.pathname.slice('/storage/v1/object/'.length).split('/').map(decodeURIComponent)
+  // A public bucket only opens the /public/ download address; listings still follow the policies.
+  const mayRead = (f) => f.owner === who || (who && api.files === 'shared')
+  if (req.method === 'POST' && parts[0] === 'list') {
+    if (!who) return json(200, [])
+    const { prefix = '' } = JSON.parse(body || '{}')
+    return json(200, api.stored.filter((f) => f.bucket === parts[1] && f.path.startsWith(prefix) && mayRead(f)).map((f) => ({ name: f.path.split('/').at(-1) })))
+  }
+  if (req.method === 'GET' && (parts[0] === 'authenticated' || parts[0] === 'public')) {
+    const f = api.stored.find((x) => x.bucket === parts[1] && x.path === parts.slice(2).join('/'))
+    const ok = f && (parts[0] === 'public' ? api.files === 'public' : who && mayRead(f))
+    return ok ? res.writeHead(200, { 'content-type': 'text/plain' }).end(f.body) : json(400, { error: 'not_found' })
+  }
+  if (!who) return json(400, { error: 'unauthorized' })
+  if (req.method === 'POST') {
+    const [bucket, ...path] = parts
+    api.stored = api.stored.filter((f) => !(f.bucket === bucket && f.path === path.join('/')))
+    api.stored.push({ bucket, path: path.join('/'), owner: who, body })
+    return json(200, { Key: parts.join('/') })
+  }
+  if (req.method === 'DELETE') {
+    const { prefixes = [] } = JSON.parse(body || '{}')
+    api.stored = api.stored.filter((f) => !(f.bucket === parts[0] && prefixes.includes(f.path) && f.owner === who))
+    return json(200, [])
+  }
+  json(405, {})
+}
+
+// Stand-in Supabase Realtime: a bare WebSocket (Phoenix vsn 1.0.0 messages). "broadcast" sends each new
+// row on the public topic invoices:<owner>, "changes" sends it to every database-changes subscriber.
+const sockets = new Set()
+function liveSocket(req, socket) {
+  if (!api.realtime || !req.url.startsWith('/realtime/v1/websocket')) return socket.destroy()
+  const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+  socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`)
+  const client = { socket, topics: new Map() }
+  sockets.add(client)
+  let buf = Buffer.alloc(0)
+  socket.on('data', (d) => {
+    buf = Buffer.concat([buf, d])
+    while (buf.length >= 2) {
+      let len = buf[1] & 0x7f
+      let off = 2
+      if (len === 126) [len, off] = [buf.length >= 4 ? buf.readUInt16BE(2) : Infinity, 4]
+      const masked = buf[1] & 0x80 ? 4 : 0
+      if (buf.length < off + masked + len) return
+      const data = Buffer.from(buf.subarray(off + masked, off + masked + len))
+      if (masked) for (let i = 0; i < data.length; i++) data[i] ^= buf[off + (i % 4)]
+      const op = buf[0] & 0x0f
+      buf = buf.subarray(off + masked + len)
+      if (op === 8) return socket.end()
+      if (op !== 1) continue
+      const m = JSON.parse(data.toString('utf8'))
+      if (m.event !== 'phx_join') continue
+      client.topics.set(m.topic.replace(/^realtime:/, ''), m.payload?.config?.postgres_changes ?? [])
+      send(client, { topic: m.topic, event: 'phx_reply', payload: { status: 'ok', response: {} }, ref: m.ref })
+    }
+  })
+  const gone = () => sockets.delete(client)
+  socket.on('close', gone)
+  socket.on('error', gone)
+}
+function send(client, msg) {
+  const data = Buffer.from(JSON.stringify(msg))
+  const head = data.length < 126 ? Buffer.from([0x81, data.length]) : Buffer.from([0x81, 126, data.length >> 8, data.length & 255])
+  client.socket.write(Buffer.concat([head, data]))
+}
+function liveInsert(row) {
+  for (const c of sockets) {
+    for (const [topic, changes] of c.topics) {
+      if (api.realtime === 'broadcast' && topic === `invoices:${row.user_id}`) send(c, { topic: `realtime:${topic}`, event: 'broadcast', payload: { type: 'broadcast', event: 'new_row', payload: { record: row } }, ref: null })
+      if (api.realtime === 'changes' && changes.some((x) => x.table === 'invoices')) send(c, { topic: `realtime:${topic}`, event: 'postgres_changes', payload: { data: { type: 'INSERT', record: row } }, ref: null })
+    }
+  }
+}
+
+function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {}, rows = [], responseLimit = Infinity, exactCount = false, insert = 'own', rpc = 'own', files = 'private', realtime = null } = {}) {
   const seeded = rows.map((row, i) => ({ amount_cents: 100, id: i + 1, ...row }))
-  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, exactCount, responseLimit, rows: seeded, synced: new Set(), nextId: seeded.length + 1, seen: [] })
+  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, exactCount, responseLimit, insert, rpc, files, realtime, stored: [], heard: [], rows: seeded, synced: new Set(), nextId: seeded.length + 1, seen: [] })
 }
 
 const env = (p, modes, extra = {}) => ({ ...process.env, ...extra, KANE_CLI_BIN: FAKE, FAKE_KANE_DIR: p.kane, FAKE_KANE_MODES: modes, FAKE_KANE_FORBID: PASSWORD, FAKE_KANE_API: API })
@@ -536,4 +628,162 @@ test('coverage: a user-data table no probe reaches is listed as not checked', as
   const r = await run(p, 'clean')
   assert.equal(r.out.coverage, '1/2')
   assert.match(r.read('report.md'), /1 of 2 user-data tables were read during this check \(`invoices`\)\.\nNot checked: `notes`/)
+})
+
+const OPEN_INSERT = LEAKY.replace(/with check \(\(select auth\.uid\(\)\) = user_id\);\n\ncreate policy "Users can update/, 'with check (true);\n\ncreate policy "Users can update')
+const owned = (p) => api.rows.filter((r) => String(r.note).includes('-f') || String(r.note).includes('-r'))
+const objectives = (p) => readFileSync(join(p.kane, 'objectives.log'), 'utf8')
+
+test('forged owner: the stranger can add a row in the owner\'s name, and the brief asks for a "with check"', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', OPEN_INSERT]] })
+  setApi(p, { insert: 'any' })
+  const r = await run(p, 'clean')
+  assert.equal(r.code, 1, r.stderr)
+  assert.equal(r.out.verdict, 'TAMPER')
+  assert.match(r.out.why, /create a row in `invoices` that names the owner in `user_id`/)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /`"Users can insert their own invoices"` \(0001_invoices\.sql, for insert\): `with check \(true\)` \*\*checks nothing about the owner\*\*/)
+  assert.match(fix, /drop policy if exists "Users can insert their own invoices" on public\.invoices;/)
+  assert.match(fix, /for insert to authenticated\n  with check \(\(select auth\.uid\(\)\) = user_id\);/)
+  assert.doesNotMatch(fix, /UPDATE and DELETE policies on `invoices` don't check/)
+  assert.match(r.read('report.md'), /## Forged owner[\s\S]*It was stored[\s\S]*Deleted again afterwards: yes/)
+  assert.deepEqual(owned(p), [], 'the forged row is deleted again')
+  assert.deepEqual(JSON.parse(r.read('history.jsonl').trim().split('\n').at(-1)).findings, ['TAMPER:forged'])
+})
+
+test('forged owner: refused by the insert policy is CLEAN', async () => {
+  const p = project()
+  setApi(p, { insert: 'own' })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'CLEAN', r.out.why)
+  assert.match(r.read('report.md'), /## Forged owner[\s\S]*Refused: no such row was stored\./)
+})
+
+test('files: a bucket any signed-in account can read is a LEAK, and the file is deleted again', async () => {
+  const p = project()
+  setApi(p, { files: 'shared' })
+  const r = await run(p, 'clean', { FAKE_KANE_BUCKET: 'receipts' }, false)
+  assert.equal(r.code, 1)
+  const last = JSON.parse(r.read('last.json'))
+  assert.equal(last.verdict, 'LEAK')
+  assert.equal(last.seen, 'storage')
+  assert.match(last.why, /The owner's file in the `receipts` storage bucket: the stranger could download it, the stranger could see it in a listing\./)
+  assert.match(r.stderr, /files in receipts: stranger could download/)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /update storage\.buckets set public = false where id = 'receipts';/)
+  assert.match(fix, /\(storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/)
+  assert.doesNotMatch(fix, /Replace the open policy/, 'a file leak is not the table read policy')
+  assert.deepEqual(api.stored, [])
+  // The owner uploaded into its own folder first.
+  assert.ok(api.seen.some((x) => x.method === 'POST' && x.path.startsWith('/storage/v1/object/receipts/owner/stranger-')))
+})
+
+test('files: a public bucket hands the file to anyone with no login', async () => {
+  const p = project()
+  setApi(p, { files: 'public' })
+  const r = await run(p, 'clean', { FAKE_KANE_BUCKET: 'receipts' })
+  assert.equal(r.out.verdict, 'LEAK')
+  assert.match(r.out.why, /anyone with no login could download it/)
+})
+
+test('files: a private bucket is CLEAN', async () => {
+  const p = project()
+  setApi(p, { files: 'private' })
+  const r = await run(p, 'clean', { FAKE_KANE_BUCKET: 'receipts' })
+  assert.equal(r.out.verdict, 'CLEAN', r.out.why)
+  assert.match(r.read('report.md'), /- `receipts`: stranger download blocked \(HTTP 400\), stranger list blocked \(HTTP 200\), no login download blocked \(HTTP 400\), no login list blocked \(HTTP 200\)\. File deleted afterwards\./)
+})
+
+const DEFINER = (volatility) => `create or replace function public.my_invoices() returns setof public.invoices language sql ${volatility} security definer as $$ select * from public.invoices $$;`
+
+test('database functions: a stable function that returns every account\'s rows is a LEAK', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fn.sql', DEFINER('stable')]] })
+  setApi(p, { rpc: 'all' })
+  const r = await run(p, 'clean', { FAKE_KANE_RPC: 'my_invoices' }, false)
+  const last = JSON.parse(r.read('last.json'))
+  assert.equal(last.verdict, 'LEAK', last.why)
+  assert.match(last.why, /\/rest\/v1\/rpc\/my_invoices/)
+  assert.match(r.stderr, /stranger's login\s+POST .*\/rest\/v1\/rpc\/my_invoices -> 200, owner's canary in it/)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /`my_invoices\(\)`, a database function the app calls\. It is `security definer`/)
+  assert.match(fix, /alter function public\.my_invoices\(\) security invoker;/)
+  assert.doesNotMatch(fix, /Replace the open policy/, 'the table policy is not what leaks here')
+})
+
+test('database functions: one that may write is never called, only listed', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fn.sql', DEFINER('')]] })
+  setApi(p, { rpc: 'all' })
+  const r = await run(p, 'clean', { FAKE_KANE_RPC: 'my_invoices' })
+  assert.equal(r.out.verdict, 'CLEAN', r.out.why)
+  assert.ok(!api.seen.some((x) => x.path.startsWith('/rest/v1/rpc/')), 'no call to the function')
+  assert.match(r.read('report.md'), /Not sent again: POST http:\/\/127\.0\.0\.1:\d+\/rest\/v1\/rpc\/my_invoices \(may write \(not marked stable\)\)/)
+})
+
+test('live updates: a broadcast on a guessable public topic is a LEAK, with the owner\'s id kept out of the report', async () => {
+  const p = project()
+  setApi(p, { realtime: 'broadcast' })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'LEAK', r.out.why)
+  assert.match(r.out.why, /broadcast on `invoices:\{owner\}`/)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /on realtime\.messages/)
+  assert.match(fix, /config: \{ private: true \}/)
+  assert.doesNotMatch(fix, /Replace the open policy/)
+  assert.deepEqual(owned(p), [], 'the row it listened for is deleted again')
+})
+
+test('live updates: database changes sent to everyone point at the table read policy', async () => {
+  const p = project()
+  setApi(p, { realtime: 'changes' })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'LEAK', r.out.why)
+  assert.match(r.out.why, /received the owner's new row the moment it was saved \(database changes on `invoices`\)/)
+  assert.match(r.read('FIX.md'), /drop policy if exists "Enable read access for all users" on public\.invoices;/)
+})
+
+test('live updates: nothing heard on private channels is CLEAN', async () => {
+  const p = project()
+  setApi(p, { realtime: 'private' })
+  const r = await run(p, 'clean')
+  assert.equal(r.out.verdict, 'CLEAN', r.out.why)
+  assert.match(r.read('report.md'), /## Live updates[\s\S]*Joined: `database changes on invoices`, `invoices:\{owner\}`[\s\S]*Heard nothing of the owner's row\./)
+})
+
+test('direct links: the list hides the record, but its own page shows it to the stranger', async () => {
+  const link = 'http://localhost:5231/duebook/invoice/123e4567-e89b-12d3-a456-426614174000'
+  const p = project()
+  setApi(p)
+  const r = await run(p, 'link-leak', { FAKE_KANE_LINK: link })
+  assert.equal(r.out.verdict, 'LEAK', r.out.why)
+  assert.match(r.out.why, /on the owner's own record page, opened directly \(http:\/\/localhost:5231\/duebook\/invoice\/123e4567-e89b-12d3-a456-426614174000\), though the list hid it/)
+  assert.match(objectives(p), new RegExp(`stranger: .*Then go directly to ${link} and verify`))
+  assert.match(r.read('FIX.md'), /How it showed up: on the owner's own record page, which the stranger opened by its address/)
+  assert.match(r.read('report.md'), /opened the owner's own record page directly[\s\S]*The owner's canary showed there/)
+})
+
+test('direct links: "links": false keeps the stranger on the list page', async () => {
+  const p = project({ options: { links: false } })
+  setApi(p)
+  const r = await run(p, 'link-leak', { FAKE_KANE_LINK: 'http://localhost:5231/duebook/invoice/123e4567-e89b-12d3-a456-426614174000' })
+  assert.equal(r.out.verdict, 'CLEAN', r.out.why)
+  assert.doesNotMatch(objectives(p), /go directly to/)
+})
+
+test('direct links: only same-site addresses that name one record, never the start page', () => {
+  const start = 'https://app.example/duebook/'
+  assert.deepEqual(
+    recordLinks(
+      [
+        start,
+        'https://app.example/duebook/settings',
+        'https://other.example/invoice/123e4567-e89b-12d3-a456-426614174000',
+        'https://app.example/duebook/invoice/123e4567-e89b-12d3-a456-426614174000?x-vercel-protection-bypass=s3cret',
+        'https://app.example/duebook/?id=4521',
+        'https://app.example/duebook/?id=4521#top',
+        'https://app.example/duebook/notes/9f86d081884c7d659a2feaa0c55ad015',
+      ],
+      start,
+    ),
+    ['https://app.example/duebook/invoice/123e4567-e89b-12d3-a456-426614174000', 'https://app.example/duebook/?id=4521'],
+  )
 })
