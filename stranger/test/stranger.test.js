@@ -713,6 +713,15 @@ test('database functions: a stable function that returns every account\'s rows i
   assert.doesNotMatch(fix, /Replace the open policy/, 'the table policy is not what leaks here')
 })
 
+test('database functions: a page that only calls functions (no GET at all) still gets them sent with the stranger\'s login', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fn.sql', DEFINER('stable')]] })
+  setApi(p, { rpc: 'all' })
+  const r = await run(p, 'clean', { FAKE_KANE_RPC: 'my_invoices', FAKE_KANE_ONLY_RPC: '1' })
+  assert.equal(r.out.verdict, 'LEAK', r.out.why)
+  assert.ok(api.seen.some((x) => x.path === '/rest/v1/rpc/my_invoices' && x.auth === `Bearer ${token('stranger')}`), "called with the stranger's login")
+  assert.match(r.out.why, /the server sends the owner's canary to the stranger from .*\/rpc\/my_invoices/)
+})
+
 test('database functions: one that may write is never called, only listed', async () => {
   const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fn.sql', DEFINER('')]] })
   setApi(p, { rpc: 'all' })

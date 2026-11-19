@@ -13,6 +13,7 @@
 // FAKE_KANE_LINK: an address the owner's run visits after saving (its evidence lists it in step.json).
 // FAKE_KANE_RPC: a database function the stranger's page calls (POST /rest/v1/rpc/<name>).
 // FAKE_KANE_BUCKET: a storage bucket the owner's page downloads from.
+// FAKE_KANE_ONLY_RPC=1: the pages load everything through FAKE_KANE_RPC and send no GET reads.
 // FAKE_KANE_DIR: where session folders and calls.log go. The owner's canary is written to planted.txt
 //   there, so a test's stand-in API can hand it out.
 // FAKE_KANE_API: base URL the logged data reads point at (a stand-in Supabase in the tests).
@@ -95,6 +96,7 @@ const headers = [
   { name: 'Authorization', value: `Bearer ${token}` },
 ]
 const api = (rows) => {
+  if (process.env.FAKE_KANE_ONLY_RPC === '1') return [{ request: { method: 'POST', url: `${API}/rest/v1/rpc/${process.env.FAKE_KANE_RPC}`, headers }, response: { status: 200, content: { size: -1 } } }]
   if (role === 'owner') {
     const out = filtered ? [] : [read('invoices', rows)]
     const bucket = process.env.FAKE_KANE_BUCKET
