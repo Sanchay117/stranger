@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
 import { blastRows, renderReport, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
+import { checkGuards, loadGuards, logGuardRun, recordGuards, runKaneGuards, updateStates } from '../src/guards.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
 
@@ -14,6 +15,9 @@ Usage
   stranger init            Write a starter stranger.config.json
   stranger install-claude  Add the Stranger skill and Stop hook to this project's .claude/
   stranger report          Rewrite .stranger/report.md and FIX.md from the last run (no Kane run)
+  stranger guard           Check every leak found before is still closed (no Kane run, no credits)
+  stranger guard --kane    Also replay the Kane guard tests with kane-cli testrun (one evidence pack)
+  stranger guard --record  Turn the last run's leaks into guards (no Kane run)
 
 Options
   --config <path>  Config file (default: stranger.config.json)
@@ -23,6 +27,7 @@ Options
   --timeout <s>    Per Kane run (default: 420)
 
 Exit codes: 0 CLEAN, 1 LEAK / TAMPER / OVERLOCKED, 2 INCONCLUSIVE, 3 setup error.
+"stranger guard": 0 every guard holds, 1 one broke, 2 one could not tell, 3 setup error.
 Needs Kane CLI: npm install -g @testmuai/kane-cli && kane-cli login`
 
 const { values, positionals } = parseArgs({
@@ -33,6 +38,8 @@ const { values, positionals } = parseArgs({
     json: { type: 'boolean', default: false },
     headed: { type: 'boolean', default: false },
     timeout: { type: 'string' },
+    kane: { type: 'boolean', default: false },
+    record: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
 })
@@ -86,6 +93,99 @@ if (command === 'report') {
     console.error(`stranger report: ${err.code === 'ENOENT' ? 'no .stranger/last.json yet: run "stranger run" first' : err.message}`)
     process.exit(3)
   }
+}
+
+if (command === 'guard') {
+  let cfg
+  try {
+    cfg = loadConfig(values.config, values.url ? { url: values.url } : {})
+  } catch (err) {
+    console.error(`stranger: ${err.message}`)
+    process.exit(3)
+  }
+  if (values.record) {
+    try {
+      const last = JSON.parse(readFileSync(join(cfg.root, '.stranger', 'last.json'), 'utf8'))
+      const rec = recordGuards(cfg, last)
+      say(`From run ${last.id} (${last.verdict}): ${rec.added.length} new API ${rec.added.length === 1 ? 'guard' : 'guards'}, ${rec.kane.length} new Kane ${rec.kane.length === 1 ? 'guard' : 'guards'}.`)
+    } catch (err) {
+      console.error(`stranger guard: ${err.code === 'ENOENT' ? 'no .stranger/last.json yet: run "stranger run" first' : err.message}`)
+      process.exit(3)
+    }
+  }
+  const { data } = loadGuards(cfg)
+  if (!data.guards.length && !data.kane.length) {
+    say('No guards yet. Each leak "stranger run" finds becomes one.')
+    if (values.json) process.stdout.write(JSON.stringify({ verdict: 'NONE', guards: [] }) + '\n')
+    process.exit(0)
+  }
+  const paint = (v) => (v === 'HOLDS' ? green(v) : v === 'UNKNOWN' || v === 'NONE' ? yellow(v) : red(v))
+  let api = []
+  if (data.guards.length) {
+    say(`${bold('Stranger guards')} ${dim(`${data.guards.length} ${data.guards.length === 1 ? 'read' : 'reads'} that leaked before, sent again as the owner, the stranger and with no login`)}`)
+    try {
+      api = await checkGuards(cfg, data.guards)
+    } catch (err) {
+      console.error(`stranger guard: ${err.message}`)
+      process.exit(3)
+    }
+    for (const r of api) {
+      const g = data.guards.find((x) => x.id === r.id)
+      say(`  ${paint(r.status.padEnd(7))} ${r.method} ${r.path.split('?')[0]} ${dim(`(found in run ${g?.found?.run ?? '?'}): ${r.why}`)}`)
+    }
+  }
+  let kane = null
+  if (values.kane && data.kane.length) {
+    say(`\n${bold('Kane guards')} ${dim(`${data.kane.length} ${data.kane.length === 1 ? 'test' : 'tests'} with kane-cli testrun (recorded steps replay; new ones are authored first)`)}`)
+    const heads = {}
+    kane = await runKaneGuards(cfg, {
+      headless: !values.headed,
+      onEvent: (e) => {
+        const t = e.type ?? e.event
+        const inner = e.event && typeof e.event === 'object' ? e.event : null
+        const file = String(e.path ?? e.member?.path ?? e.member ?? '').split('/').at(-1)
+        if (t === 'testrun_authored_member_start') say(`    ${dim(`${file}: Kane writes the steps first (a new or changed test)`)}`)
+        else if (t === 'testrun_member_start') say(`    ${dim(`${file}: Kane runs the test`)}`)
+        if (inner?.type === 'test_md_step_start') heads[inner.step_index] = inner.heading
+        if (inner?.type === 'test_md_step_end') say(`    ${dim(`  step ${inner.step_index} ${inner.status.padEnd(6)} ${heads[inner.step_index] ?? ''} (${Math.round(inner.duration_s ?? 0)}s)`)}`)
+      },
+    })
+    for (const r of kane?.results ?? []) {
+      say(`  ${paint(r.status.padEnd(7))} ${r.file} ${dim(r.why)}`)
+      const steps = (n) => `${n} ${n === 1 ? 'step' : 'steps'}`
+      const how = [
+        r.replayed ? `replayed ${steps(r.replayed)} from Kane's recording` : null,
+        r.authored ? `Kane wrote ${steps(r.authored)}${r.replayed ? ' again' : ''}` : null,
+        r.recorded === false && r.authored ? 'a failing step is written again next run' : null,
+      ].filter(Boolean).join(', ') || null
+      const bits = [how, r.credits != null ? `${r.credits} credits` : null, r.testUrl].filter(Boolean)
+      if (bits.length) say(dim(`          ${bits.join(', ')}`))
+    }
+    if (kane) {
+      const gates = kane.policy?.result ? `policy ${kane.policy.result}${kane.policy.failedGates?.length ? ` (${kane.policy.failedGates.join(', ')})` : ''}` : null
+      say(dim(`    ${[`${kane.seconds}s`, kane.credits != null ? `${kane.credits} credits` : null, gates, kane.pack ? `evidence ${relative(process.cwd(), kane.pack) || kane.pack}` : null].filter(Boolean).join(', ')}`))
+      if (kane.cleaned === false) say(yellow("    Could not delete every row the guard planted; check the owner's and the stranger's records."))
+      if (kane.secrets.length) say(red(`    Kane's recordings hold a password (${kane.secrets.join(', ')}). Keep .stranger/guards/kane/output-*/ out of git.`))
+    }
+  } else if (data.kane.length) {
+    say(dim(`\n  ${data.kane.length} Kane ${data.kane.length === 1 ? 'guard' : 'guards'} not run (add --kane: replays use far fewer credits than a check)`))
+  }
+  updateStates(cfg, api, kane?.results ?? [])
+  const all = [...api, ...(kane?.results ?? [])]
+  const verdict = !all.length ? 'NONE' : all.some((r) => r.status === 'BROKEN') ? 'BROKEN' : all.some((r) => r.status === 'UNKNOWN') ? 'UNKNOWN' : 'HOLDS'
+  if (all.length) logGuardRun(cfg, { verdict, api, kane })
+  if (values.json) {
+    process.stdout.write(
+      JSON.stringify({
+        verdict,
+        guards: api.map(({ id, table, method, path, status, why, tries }) => ({ id, table, method, path, status, why, tries })),
+        ...(kane ? { kane: { exitCode: kane.exitCode, results: kane.results, testUrl: kane.testUrl, credits: kane.credits, policy: kane.policy, pack: kane.pack, cleaned: kane.cleaned } } : {}),
+      }) + '\n',
+    )
+  } else {
+    say(`\n${paint(verdict)}  ${verdict === 'HOLDS' ? 'Every leak found before is still closed.' : verdict === 'BROKEN' ? 'A leak found before is open again.' : verdict === 'NONE' ? 'Nothing was checked.' : 'Some guards could not tell this time.'}`)
+  }
+  process.exit(verdict === 'HOLDS' || verdict === 'NONE' ? 0 : verdict === 'BROKEN' ? 1 : 2)
 }
 
 if (command !== 'run') {
@@ -168,6 +268,13 @@ const result = await check(cfg, {
 })
 
 const files = writeReport(cfg, result)
+const guarded = cfg.guards ? recordGuards(cfg, result) : null
+if (guarded?.added.length || guarded?.reopened.length || guarded?.kane.length) {
+  say('')
+  for (const g of guarded.added) say(`  ${bold('New guard')} ${dim(`${g.method} ${g.path.split('?')[0]} (${g.logins.join(', ')}): "stranger guard" checks it again in seconds, with no Kane run`)}`)
+  for (const g of guarded.reopened) say(`  ${red('Guard reopened')} ${dim(`${g.method} ${g.path.split('?')[0]}: a leak fixed before is back`)}`)
+  for (const k of guarded.kane) say(`  ${bold('New Kane guard')} ${dim(`.stranger/guards/kane/${k.file}: "stranger guard --kane" replays it with kane-cli testrun`)}`)
+}
 
 if (values.json) {
   process.stdout.write(
@@ -180,6 +287,7 @@ if (values.json) {
       ownerRun: result.ownerRun?.testUrl ?? null,
       strangerRun: result.strangerRun?.testUrl ?? null,
       findings: result.findings?.map((f) => f.kind) ?? [],
+      ...(guarded ? { guards: { added: guarded.added.length, reopened: guarded.reopened.length, kane: guarded.kane.length } } : {}),
       ...(result.coverage ? { coverage: `${result.coverage.probed.length}/${result.coverage.tables.length}` } : {}),
       ...(result.blast?.length ? { blast: result.blast.map(({ table, stranger, anonymous, sensitive }) => ({ table, stranger, anonymous, sensitive })) } : {}),
       ...(result.probes.length > 1 ? { probes: result.probes.map((p) => ({ name: p.probe, verdict: p.verdict, canary: p.canary })) } : {}),

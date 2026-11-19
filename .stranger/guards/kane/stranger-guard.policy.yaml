@@ -1,0 +1,17 @@
+policy: stranger-guard
+gates:
+  - id: no-leak-came-back
+    metric: totals.failed
+    equals: 0
+    severity: blocking
+    message: A leak Kane found before is back. The stranger can see the owner's record again.
+  - id: no-guard-broke-down
+    metric: totals.broken
+    equals: 0
+    severity: blocking
+    message: A guard could not finish, so it proves nothing this time.
+  - id: replayed-not-rewritten
+    metric: metrics.heal.exhausted_tests
+    equals: 0
+    severity: warning
+    message: The page changed so much that Kane had to write a guard again from scratch.

@@ -4,8 +4,9 @@
 #   3. Stranger runs Kane CLI on it as the owner and as a stranger,
 #   4. on a finding, Claude Code (headless) gets .stranger/FIX.md with Stranger's Stop hook armed. It writes
 #      a migration and applies it to the preview database; when it stops, the hook runs Stranger again,
-#   5. if Stranger then says CLEAN, this workflow commits the migration to the branch, marks that commit,
-#      and comments before and after (Kane run links, the SQL) on the pull request.
+#   5. if Stranger then says CLEAN, the leak guards (.stranger/guards.json) run against the preview database,
+#      and this workflow commits the migration to the branch, marks that commit, and comments before and
+#      after (Kane run links, the SQL, the guards) on the pull request.
 # The live demo database is never touched. At most two fix-loop commits per branch.
 # Costs about 100 Kane credits per loop (two Stranger runs) plus the agent's Anthropic API usage.
 #
@@ -103,6 +104,9 @@ jobs:
         id: loop
         env:
           PREVIEW_DB_URL: ${{ secrets.PREVIEW_DB_URL }}
+          # The leak guards run against the preview project once Stranger says CLEAN.
+          SUPABASE_URL: ${{ secrets.PREVIEW_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ALLOW_AGENT: ${{ steps.guard.outputs.allow }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

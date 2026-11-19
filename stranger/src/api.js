@@ -20,7 +20,7 @@ const TIMEOUT = 15_000
 const strip = (headers) => Object.fromEntries(Object.entries(headers).filter(([k]) => !NEVER_SEND.has(k)))
 
 // A raw string body goes as is with its own content type; anything else is sent as JSON.
-async function call(method, url, headers, body, type) {
+export async function call(method, url, headers, body, type) {
   const out = { method, url, status: null, text: '', json: null, error: null }
   const raw = typeof body === 'string' && type
   try {
@@ -70,7 +70,7 @@ export async function replayReads(reads, needle, strangerLogin, onRead) {
 }
 
 const SAMPLE_LIMIT = 1000
-const OWNER_COLUMNS = ['user_id', 'owner_id', 'owner', 'created_by', 'author_id', 'profile_id']
+export const OWNER_COLUMNS = ['user_id', 'owner_id', 'owner', 'created_by', 'author_id', 'profile_id']
 const SENSITIVE = /email|phone|address|amount|price|total|salary|note|message|token|secret|ssn|dob|birth|iban|card/i
 
 export function subjectOf(login) {

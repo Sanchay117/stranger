@@ -1,12 +1,16 @@
-# Stranger as a pull request gate. When Vercel finishes a preview deploy for a pull request labelled
-# "stranger", this runs Stranger against the preview, comments the verdict and Kane's run link on the
-# pull request, and fails the check on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend
-# Kane credits (about 50 per run).
+# Stranger as a pull request gate. When Vercel finishes a preview deploy for an open pull request:
+# - every pull request: the leak guards (.stranger/guards.json) run, the reads that leaked before sent
+#   again with fresh logins. No Kane run, no credits, seconds.
+# - pull requests labelled "stranger": Stranger runs Kane against the preview (about 50 credits), then
+#   replays the Kane guard tests with kane-cli testrun (far fewer credits once recorded).
+# It comments the verdicts and Kane's run links on the pull request, and fails the check on a broken
+# guard, or on LEAK, TAMPER or OVERLOCKED.
 #
 # Repository secrets: LT_USERNAME, LT_ACCESS_KEY (TestMu AI / LambdaTest), OWNER_EMAIL, OWNER_PASSWORD,
 # STRANGER_EMAIL, STRANGER_PASSWORD. Optional: SUPABASE_DB_URL (live policies in the fix brief),
 # VERCEL_AUTOMATION_BYPASS_SECRET (if previews are behind Vercel's login).
-# Repository variables (optional): STRANGER_PATH, the app's path on the preview (Duebook: /duebook/),
+# Repository variables: SUPABASE_URL and SUPABASE_ANON_KEY (the app's public project URL and anon key, for
+# the guards). Optional: STRANGER_PATH, the app's path on the preview (Duebook: /duebook/),
 # KANE_PROJECT_ID and KANE_FOLDER_ID (skip Kane's project picker).
 name: Stranger
 
@@ -24,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Find the labelled pull request for this deploy
+      - name: Find the pull request for this deploy
         id: pr
         uses: actions/github-script@v7
         with:
@@ -34,9 +38,12 @@ jobs:
               repo: context.repo.repo,
               commit_sha: context.payload.deployment.sha,
             })
-            const pr = data.find((p) => p.state === 'open' && p.labels.some((l) => l.name === 'stranger'))
+            const pr = data.find((p) => p.state === 'open')
+            const labelled = !!pr && pr.labels.some((l) => l.name === 'stranger')
             core.setOutput('number', pr ? String(pr.number) : '')
-            if (!pr) core.notice('No open pull request labelled "stranger" for this deploy, so Stranger did not run.')
+            core.setOutput('kane', labelled ? 'true' : '')
+            if (!pr) core.notice('No open pull request for this deploy, so Stranger did not run.')
+            else if (!labelled) core.notice('Not labelled "stranger": only the leak guards run (no Kane credits).')
 
       - uses: actions/checkout@v4
         if: steps.pr.outputs.number != ''
@@ -48,8 +55,24 @@ jobs:
         with:
           node-version: 24
 
+      - name: Leak guards (no Kane run)
+        id: guards
+        if: steps.pr.outputs.number != '' && hashFiles('.stranger/guards.json') != ''
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+          OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+          STRANGER_EMAIL: ${{ secrets.STRANGER_EMAIL }}
+          STRANGER_PASSWORD: ${{ secrets.STRANGER_PASSWORD }}
+        run: |
+          set +e
+          node stranger/bin/stranger.js guard --json > guards.json
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat guards.json
+
       - name: Install and log in to Kane CLI
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.kane != ''
         env:
           LT_USERNAME: ${{ secrets.LT_USERNAME }}
           LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
@@ -64,9 +87,9 @@ jobs:
           kane-cli login "${args[@]}"
           kane-cli whoami
 
-      - name: Run Stranger on the preview
+      - name: Run Stranger on the preview, then the Kane guards
         id: run
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.kane != ''
         env:
           PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
           STRANGER_PATH: ${{ vars.STRANGER_PATH }}
@@ -76,48 +99,68 @@ jobs:
           STRANGER_EMAIL: ${{ secrets.STRANGER_EMAIL }}
           STRANGER_PASSWORD: ${{ secrets.STRANGER_PASSWORD }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: |
           url="${PREVIEW_URL%/}${STRANGER_PATH:-/}"
           if [ -n "$BYPASS" ]; then
             sep='?'; [[ "$url" == *\?* ]] && sep='&'
             url="${url}${sep}x-vercel-protection-bypass=${BYPASS}&x-vercel-set-bypass-cookie=true"
           fi
+          # Only Kane guards committed before this run are replayed here; a new one is authored on a later run.
+          had_kane=""; [ -d .stranger/guards/kane ] && had_kane=1
           set +e
           node stranger/bin/stranger.js run --json --url "$url" > stranger.json
           code=$?
-          set -e
           echo "code=$code" >> "$GITHUB_OUTPUT"
           cat stranger.json
+          # The Kane guard tests (if any): kane-cli testrun replays them as one execution.
+          if [ -n "$had_kane" ]; then
+            node stranger/bin/stranger.js guard --kane --json --url "$url" > kane-guards.json
+            echo "guards=$?" >> "$GITHUB_OUTPUT"
+            cat kane-guards.json
+          fi
+          set -e
 
       - name: Comment the verdict on the pull request
-        if: steps.pr.outputs.number != '' && always()
+        if: steps.pr.outputs.number != '' && (steps.pr.outputs.kane != '' || steps.guards.outputs.code != '') && always()
         uses: actions/github-script@v7
         env:
           PR: ${{ steps.pr.outputs.number }}
+          KANE: ${{ steps.pr.outputs.kane }}
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
         with:
           script: |
             const fs = require('fs')
             const scrub = (t) => (process.env.BYPASS ? t.split(process.env.BYPASS).join('***') : t)
-            let result = null
-            try { result = JSON.parse(fs.readFileSync('stranger.json', 'utf8').trim().split('\n').at(-1)) } catch {}
+            const lastLine = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8').trim().split('\n').at(-1)) } catch { return null } }
+            const result = lastLine('stranger.json')
+            const guards = lastLine('kane-guards.json') ?? lastLine('guards.json')
             let report = ''
             try { report = fs.readFileSync('.stranger/report.md', 'utf8') } catch {}
             const icon = { CLEAN: '✅', LEAK: '🚨', TAMPER: '🚨', OVERLOCKED: '⚠️', INCONCLUSIVE: '❔' }
+            const gicon = { HOLDS: '✅', BROKEN: '🚨', UNKNOWN: '❔' }
             const head = result
               ? `${icon[result.verdict] ?? ''} **Stranger: ${result.verdict}** on ${process.env.PREVIEW_URL}\n\n${result.why}\n\n` +
                 (result.strangerRun ? `[Kane run](${result.strangerRun})` : '')
-              : '❔ **Stranger could not run.** See the workflow log.'
-            const body = scrub(`<!-- stranger -->\n${head}\n\n<details><summary>Full report</summary>\n\n${report}\n</details>`)
+              : process.env.KANE ? '❔ **Stranger could not run.** See the workflow log.' : ''
+            const glines = guards?.guards?.length || guards?.kane
+              ? [`${gicon[guards.verdict] ?? ''} **Leak guards: ${guards.verdict}** (leaks Kane found before)`, '',
+                 ...(guards.guards ?? []).map((g) => `- ${gicon[g.status] ?? ''} \`${g.method} ${g.path.split('?')[0]}\`: ${g.why}`),
+                 ...(guards.kane?.results ?? []).map((k) => `- ${gicon[k.status] ?? ''} Kane guard \`${k.file}\` (kane-cli testrun): ${k.why}`),
+                 ...(guards.kane?.testUrl ? ['', `[Kane guard run](${guards.kane.testUrl})`] : [])].join('\n')
+              : ''
+            const body = scrub(`<!-- stranger -->\n${[head, glines].filter(Boolean).join('\n\n---\n\n')}${report && result ? `\n\n<details><summary>Full report</summary>\n\n${report}\n</details>` : ''}`)
             const issue = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR) }
             const comments = await github.paginate(github.rest.issues.listComments, issue)
             const mine = comments.find((c) => c.body?.startsWith('<!-- stranger -->'))
             if (mine) await github.rest.issues.updateComment({ ...issue, comment_id: mine.id, body })
             else await github.rest.issues.createComment({ ...issue, body })
 
-      - name: Fail on a finding
-        if: steps.pr.outputs.number != '' && steps.run.outputs.code != '0'
+      - name: Fail on a finding or a broken guard
+        if: steps.pr.outputs.number != '' && ((steps.pr.outputs.kane != '' && steps.run.outputs.code != '0') || steps.guards.outputs.code == '1' || steps.run.outputs.guards == '1')
         run: |
-          echo "Stranger exit code ${{ steps.run.outputs.code }} (1 = LEAK, TAMPER or OVERLOCKED; 2 = INCONCLUSIVE; 3 = setup error)"
+          echo "Stranger exit code '${{ steps.run.outputs.code }}' (1 = LEAK, TAMPER or OVERLOCKED; 2 = INCONCLUSIVE; 3 = setup error)"
+          echo "Guards exit code '${{ steps.guards.outputs.code }}', Kane guards '${{ steps.run.outputs.guards }}' (1 = a leak found before is open again)"
           exit 1

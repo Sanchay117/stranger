@@ -138,11 +138,28 @@ The bench is one small notes app with ten cases on one Supabase project. Each ca
 - Each case's report and fix brief: [`bench/cases/`](bench/cases/)
 - Try a case yourself, one click, no sign-up: [as Maya, the owner](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=owner) or [as a stranger](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=stranger). Open one of Maya's notes, copy its address, and open it as the stranger.
 
+## Leak guards: Kane finds a leak once, the guard keeps it found
+
+Every leak Stranger finds becomes a guard, in two layers:
+
+- **API guards** (`.stranger/guards.json`, commit it). The reads that handed the owner's records to the stranger, with account ids swapped for `{owner}` and `{stranger}`. `stranger guard` signs both accounts in again, sends each read as the owner, as the stranger and with no login, and counts the owner's rows in the other two answers. No Kane run, no credits, about a second. Only counts are kept, never row values, tokens or keys.
+- **Kane guards** (`.stranger/guards/kane/<probe>_test.md`). When Kane saw the owner's record on the stranger's page, the probe becomes a [Kane test file](https://github.com/LambdaTest/kane-cli): both accounts, one test. `stranger guard --kane` runs every guard test with `kane-cli testrun`, as one execution with one sealed evidence pack, judged by a Kane verdict policy (`stranger-guard.policy.yaml`: no failed or broken test). Kane writes a test's steps on its first run and keeps the steps that pass. Later runs replay those with no LLM, write only a failing step again, and heal steps if the page changes. Stranger reads Kane's own checks from the run (the control had to be on the page, the canary had to be absent), not its prose. The rows each guard plants are deleted again through the API.
+
+```bash
+stranger guard            # API guards: HOLDS, BROKEN or UNKNOWN for each leak found before
+stranger guard --kane     # plus the Kane guard tests, with kane-cli testrun
+stranger guard --record   # make guards from the last run (for runs made before guards existed)
+```
+
+A guard that holds is marked fixed; if it breaks again it is reopened, and `stranger guard` exits `1`. The guards need the app's public Supabase URL and anon key, the same ones the app ships to every browser: `SUPABASE_URL` and `SUPABASE_ANON_KEY` (or the `VITE_` names) in `.env`. Kane's logins for the guard tests go in a file in Kane's variables folder only for the length of the run (`testrun` has no `--variables`), and Kane's recordings (`output-*/`) stay out of git until Stranger has checked them for passwords.
+
+On Duebook today: `stranger guard` says **BROKEN** in about a second (the stranger and a request with no login each get all 4 of Maya's invoices), because main keeps the leak on purpose. `stranger guard --kane` says **BROKEN** too. Kane planted its canary as Maya, logged in as the stranger, found the canary in the stranger's list and filed its own bug, "Unauthorized guard invoice appears in Your invoices" (98% sure); the verdict policy failed the gate `no-leak-came-back`. The first run wrote all four steps (71 credits, 167 s). The second replayed the three that passed and wrote only the failing look again (25 credits, 62 s).
+
 ## Gate pull requests (GitHub + Vercel)
 
-`.github/workflows/stranger.yml` runs Stranger on each Vercel preview deploy of a pull request labelled `stranger`, comments the verdict and Kane's run link on the pull request, and fails the check on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend Kane credits.
+`.github/workflows/stranger.yml` runs on each Vercel preview deploy of a pull request. On every pull request it runs the leak guards (no Kane run, no credits). On a pull request labelled `stranger` it also runs Stranger with Kane against the preview and replays the Kane guard tests. It comments the verdicts and Kane's run links on the pull request, and fails the check on a broken guard, or on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend Kane credits.
 
-It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / LambdaTest login, for `kane-cli login`) and the four `OWNER_*` / `STRANGER_*` values, plus the variable `STRANGER_PATH` if the app is not at the root of the preview (Duebook: `/duebook/`). If previews sit behind Vercel's login, add `VERCEL_AUTOMATION_BYPASS_SECRET`.
+It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / LambdaTest login, for `kane-cli login`) and the four `OWNER_*` / `STRANGER_*` values, the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY` (public, for the guards), plus the variable `STRANGER_PATH` if the app is not at the root of the preview (Duebook: `/duebook/`). If previews sit behind Vercel's login, add `VERCEL_AUTOMATION_BYPASS_SECRET`.
 
 ## Fix loop in CI: no human in it
 
@@ -151,7 +168,8 @@ It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / 
 1. the preview database is set to that branch's migrations (`scripts/preview-sync.mjs`), and the app is built from the branch and served inside the job;
 2. Stranger runs Kane CLI on it as the owner and as a stranger;
 3. on a finding, Claude Code runs headless with `.stranger/FIX.md` and Stranger's Stop hook armed. It writes a migration and applies it to the preview database. When it stops, the hook runs Stranger again with a fresh canary, and keeps it going until CLEAN;
-4. once Stranger says CLEAN, the workflow (not the agent) commits the migration to the branch, marks that commit, and comments before and after on the pull request: both Kane runs, the SQL, and what the agent said.
+4. once Stranger says CLEAN, the leak guards run against the preview database, so the comment also shows that the leaks Kane found before stay closed;
+5. the workflow (not the agent) commits the migration to the branch, marks that commit, and comments before and after on the pull request: both Kane runs, the SQL, what the agent said, and the guards.
 
 The live demo database is never touched, and a branch gets at most two fix-loop commits. One loop costs about 100 Kane credits (two Stranger runs) plus the agent's API usage, capped at 5 dollars (`AGENT_BUDGET_USD`). The logic lives in `scripts/fix-loop.mjs`, tested offline with a stand-in Kane and a stand-in agent.
 

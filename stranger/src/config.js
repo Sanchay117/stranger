@@ -48,6 +48,11 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   cfg.storageBuckets = Array.isArray(cfg.storageBuckets) ? cfg.storageBuckets.map(String) : []
   // Optional: a Postgres URL (read only use) so the fix brief can list the live policies too.
   cfg.databaseUrl = optionalEnv(cfg.databaseUrl)
+  // Leak guards: the reads that leaked, sent again by "stranger guard" against this Supabase project (its
+  // public URL and anon key, as the app itself ships them), and Kane test files for the page checks.
+  cfg.guards ??= cfg.database === 'supabase'
+  cfg.supabaseUrl = optionalEnv(cfg.supabaseUrl ?? '$SUPABASE_URL') ?? optionalEnv('$VITE_SUPABASE_URL')
+  cfg.supabaseAnonKey = optionalEnv(cfg.supabaseAnonKey ?? '$SUPABASE_ANON_KEY') ?? optionalEnv('$VITE_SUPABASE_ANON_KEY')
   cfg.database ??= 'unknown'
   cfg.migrations ??= null
   cfg.timeout ??= 420
