@@ -21,6 +21,9 @@
     "db:apply": "node --env-file=.env scripts/db-apply.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
     "demo:reset": "node --env-file=.env scripts/demo-reset.mjs",
+    "preview:setup": "node --env-file=.env scripts/preview-setup.mjs",
+    "bench:apply": "node --env-file=.env scripts/bench-apply.mjs",
+    "bench": "node --env-file=.env bench/run.mjs",
     "demo": "npm --prefix demo run dev",
     "stranger": "node stranger/bin/stranger.js run",
     "test": "node --test stranger/test/stranger.test.js"
