@@ -19,20 +19,24 @@ AI app builders often ship a database rule that lets every account read every ro
 ## How it works
 
 1. **The owner plants a canary.** Kane signs in as your first test account and saves a random string, like `stranger-canary-afb57e`, into a record.
-2. **A stranger looks for it.** Kane signs in as a second account. It saves its own control string and checks it can see that, so an empty or broken page can never pass. Then it checks the owner's canary is nowhere on the page.
+2. **A stranger looks for it.** Kane signs in as a second account. It saves its own control string and checks it can see that, so an empty or broken page can never pass. Then it checks the owner's canary is nowhere on the page. If the owner's run opened the record's own page (an address like `/notes/<id>`), the stranger opens that address directly too: plenty of apps hide a record from the list and still show it to anyone with the link.
 3. **API checks, in seconds, with no extra Kane credits.** Kane logs every request both browsers made (with their logins), but not the answers. Stranger uses that log to ask the server directly:
    - **Reads.** Every data read from *both* pages is sent again with the stranger's login, then with **no login at all**. This catches data the page hides, tables only the owner's page reads, and data anyone on the internet can read.
    - **Numeric canary.** The owner adds a second row with an odd number (7331) in every numeric column. If anything the stranger reads changes, such as a total or a count, the owner's data is leaking into it, even though no text shows up. The row is removed afterwards.
    - **Tamper.** The stranger tries to change, then delete, the owner's canary row. The owner reads it back after each try and puts it back if needed.
+   - **Forged owner.** The stranger adds a row that names the owner as its owner. If the insert policy has no `with check`, anyone can put records into anyone's account. The row is deleted again.
+   - **Database functions.** Functions the pages called (`/rest/v1/rpc/...`) are called again as the stranger and with no login, but only the ones your migrations mark `stable` or `immutable` and that take no arguments, so Stranger never sets off a function that writes.
+   - **Files.** In each storage bucket the pages touched, the owner uploads a small file holding the canary. The stranger, and a request with no login, try to download it and to list the owner's folder. The file is deleted afterwards.
+   - **Live updates.** The stranger opens the app's realtime connection and listens on the owner's likely channels (named after the table and the owner's id) and for database changes, while the owner saves a row. Hearing it is a leak no page and no API read shows.
    - **Personas** (optional). More test accounts: a teammate who *should* see the owner's rows, a removed member who should not. A fix that locks the teammate out fails too.
 4. **Verdict.**
-   - **LEAK**: someone saw the owner's data: on the page, in what the server sends, with no login, through a total or count, or as a persona who should not.
-   - **TAMPER**: the stranger could change or delete the owner's record.
+   - **LEAK**: someone saw the owner's data: on the page, on the record's own page, in what the server sends, with no login, through a total or count, in a file, in a live update, or as a persona who should not.
+   - **TAMPER**: the stranger could change or delete the owner's record, or add one in the owner's name.
    - **OVERLOCKED**: someone who should see the owner's data (a teammate persona) can't.
    - **CLEAN**: none of the above.
    - **INCONCLUSIVE**: Kane could not finish (login failed, a wrong hint in the config, no credits). Never treated as clean.
 
-Every run uses a fresh canary, so old data can't fake a pass. The numeric, tamper and persona checks speak Supabase's API (PostgREST); the read replay works for any app.
+Every run uses a fresh canary, so old data can't fake a pass. The numeric, tamper, forged owner, files, live-update and persona checks speak Supabase's APIs; the page check, direct links and the read replay work for any app. Each one can be turned off in the config (`"forge": false`, `"storage": false`, `"realtime": false`, `"rpc": false`, `"links": false`); `storageBuckets` and `realtimeTopics` (with `{owner}` and `{table}`) add buckets and channel names the pages did not show.
 
 **Blast radius.** Stranger counts the rows and accounts visible in the GET replies it already checks, with the stranger's login and with none. The report lists counts and sensitive column names. The app's filters and reply limits still apply. Set `"blast": false` to turn it off.
 
@@ -124,11 +128,38 @@ touch .stranger/armed
 
 This adds a Stranger skill and a Stop hook. While `.stranger/armed` exists and watched files changed, the agent can't finish until Stranger says CLEAN. On a LEAK the hook hands it the fix brief. It lets go after 3 failed checks, or after 2 reminders where the agent changed nothing (for example when it explains why it shouldn't touch the database), so it never traps the agent. `rm .stranger/armed` turns it off.
 
+## The bench: ten ways to leak, and what Stranger caught
+
+<!-- bench-score -->Not run yet.<!-- /bench-score -->
+
+The bench is one small notes app with ten cases on one Supabase project. Each case leaves in one bug from a different class, and one leaves in none: row level security off, a filter only in the page, a view without `security_invoker`, a database function that returns everyone's rows, a record page that skips the owner check, an insert without `with check`, a total that adds up everyone, files any account can read, live updates on a public channel, and a clean control. Stranger runs on each one with the real Kane CLI, the same way it runs on any app.
+
+- Scorecard with Kane run links: https://stranger-2yf3.vercel.app/bench/ (and [`bench/README.md`](bench/README.md))
+- Each case's report and fix brief: [`bench/cases/`](bench/cases/)
+- Try a case yourself, as the owner or the stranger: https://stranger-2yf3.vercel.app/bench/?case=detail_page
+
 ## Gate pull requests (GitHub + Vercel)
 
 `.github/workflows/stranger.yml` runs Stranger on each Vercel preview deploy of a pull request labelled `stranger`, comments the verdict and Kane's run link on the pull request, and fails the check on LEAK, TAMPER or OVERLOCKED. Only labelled pull requests spend Kane credits.
 
 It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / LambdaTest login, for `kane-cli login`) and the four `OWNER_*` / `STRANGER_*` values, plus the variable `STRANGER_PATH` if the app is not at the root of the preview (Duebook: `/duebook/`). If previews sit behind Vercel's login, add `VERCEL_AUTOMATION_BYPASS_SECRET`.
+
+## Fix loop in CI: no human in it
+
+`.github/workflows/stranger-fix.yml` closes the loop inside a pull request. Label a pull request `stranger-fix` and:
+
+1. the preview database is set to that branch's migrations (`scripts/preview-sync.mjs`), and the app is built from the branch and served inside the job;
+2. Stranger runs Kane CLI on it as the owner and as a stranger;
+3. on a finding, Claude Code runs headless with `.stranger/FIX.md` and Stranger's Stop hook armed. It writes a migration and applies it to the preview database. When it stops, the hook runs Stranger again with a fresh canary, and keeps it going until CLEAN;
+4. once Stranger says CLEAN, the workflow (not the agent) commits the migration to the branch, marks that commit, and comments before and after on the pull request: both Kane runs, the SQL, and what the agent said.
+
+The live demo database is never touched, and a branch gets at most two fix-loop commits. One loop costs about 100 Kane credits (two Stranger runs) plus the agent's API usage, capped at 5 dollars (`AGENT_BUDGET_USD`). The logic lives in `scripts/fix-loop.mjs`, tested offline with a stand-in Kane and a stand-in agent.
+
+Setup, once:
+
+1. Create a second Supabase project for previews. Apply the migrations and create the demo accounts there: `SUPABASE_DB_URL=<preview db url> node scripts/db-apply.mjs`, then `node scripts/seed.mjs` with that project's `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the environment.
+2. Add repository secrets: `LT_USERNAME`, `LT_ACCESS_KEY`, `OWNER_EMAIL`, `OWNER_PASSWORD`, `STRANGER_EMAIL`, `STRANGER_PASSWORD`, `ANTHROPIC_API_KEY`, and the preview project's `PREVIEW_DB_URL`, `PREVIEW_SUPABASE_URL` and `PREVIEW_SUPABASE_ANON_KEY`.
+3. Create the `stranger-fix` label.
 
 ## What it does not check
 
@@ -136,10 +167,12 @@ Be honest about the edges:
 
 - It sees only what the pages read. A table no page touches is not caught, but the coverage list in the report names it.
 - The numeric canary flags any change in what the stranger reads while only the owner acted. A page that legitimately shows everyone's totals (a public counter) will be flagged; set `"numeric": false` for it.
-- Files in storage buckets are not checked yet.
+- Database functions that may write (not marked `stable` or `immutable`) or that take arguments Kane did not log are never called on their own. A record page that loads by id is still covered by the direct link.
+- Live updates are checked on channel names Stranger can guess (the table and the owner's id) plus any in `realtimeTopics`. A channel named some other way is not.
+- Files are checked only in buckets the pages touched or `storageBuckets` names.
 - The replay sends only the data requests the stranger's page made, with the login token Kane captured. It runs right after Kane, while that token is still valid; it never sends anything that changes data, and it never writes the token down.
 - Without `databaseUrl`, the fix brief reads only your migrations, so policies added by hand in the dashboard are not listed.
-- The tamper and numeric checks write to your app's database, as your own test accounts, on Stranger's own canary rows only, and undo every change. Point Stranger at a test or demo project, not production.
+- The tamper, numeric, forged owner, files and live-update checks write to your app's database and storage, as your own test accounts, on Stranger's own canary rows and files only, and undo every change. Point Stranger at a test or demo project, not production.
 
 ## Develop
 
