@@ -98,9 +98,9 @@ before(async () => {
       return json(200, [{ total_cents: total }])
     }
     if (table !== 'invoices') return json(200, [])
-    const id = url.searchParams.get('id')?.replace(/^eq\./, '')
-    const owner = url.searchParams.get('user_id')?.replace(/^eq\./, '')
-    const match = (r) => (id == null || String(r.id) === id) && (owner == null || r.user_id === owner)
+    // PostgREST-style "column=eq.value" filters on any column.
+    const filters = [...url.searchParams].filter(([k, v]) => v.startsWith('eq.') && !['select', 'order'].includes(k)).map(([k, v]) => [k, v.slice(3)])
+    const match = (r) => filters.every(([k, v]) => String(r[k]) === v)
     if (req.method === 'GET') {
       const rows = api.rows.filter((r) => match(r) && canRead(r))
       const page = rows.slice(0, api.responseLimit)
@@ -354,9 +354,11 @@ test('replay: a locked-down API stays CLEAN, and every check leaves the owner\'s
   // Reads with no login carry no token; nothing with no login ever writes.
   const anon = api.seen.filter((x) => !x.auth && x.path.startsWith('/rest/'))
   assert.ok(anon.length > 0 && anon.every((x) => x.method === 'GET' && x.apikey === 'public-anon-key'))
-  // The stranger only ever tries writes on the owner's canary row (the tamper check).
+  // The stranger only ever tries writes on the owner's canary row (tamper) and a forged copy of it in
+  // the owner's name (forge, refused here, so there is nothing to delete).
   const strangerWrites = api.seen.filter((x) => x.auth === `Bearer ${token('stranger')}` && x.method !== 'GET')
-  assert.deepEqual(strangerWrites.map((x) => x.method), ['PATCH', 'DELETE'])
+  assert.deepEqual(strangerWrites.map((x) => x.method), ['PATCH', 'DELETE', 'POST'])
+  assert.match(strangerWrites[2].body, /-f"/)
   // The canary row is untouched and the numeric canary's extra row is gone.
   const mine = api.rows.filter((x) => x.user_id === 'owner')
   assert.deepEqual(mine.map((x) => x.note), [r.out.canary])
@@ -440,7 +442,8 @@ test('blast radius: disabling it omits the counts and uses the same requests', a
   assert.equal(Object.hasOwn(r.out, 'blast'), false)
   assert.equal(Object.hasOwn(JSON.parse(r.read('history.jsonl')), 'blast'), false)
   assert.doesNotMatch(r.read('report.md'), /Blast radius/)
-  assert.deepEqual(api.seen, requests)
+  const same = (list) => list.map((x) => JSON.stringify(x).replace(/stranger-canary-[0-9a-f]+/g, 'CANARY'))
+  assert.deepEqual(same(api.seen), same(requests))
 })
 
 test('blast radius: caps the sample and uses an exact total when the response provides one', async () => {

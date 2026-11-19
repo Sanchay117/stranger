@@ -56,6 +56,53 @@ export function apiRequests(sessionDir, limit = 25) {
   return [...out.values()].slice(0, limit)
 }
 
+// Database functions the page called with POST (supabase-js rpc), with their headers. Kane keeps no
+// request bodies, so only the URL and headers are known.
+export function rpcCalls(sessionDir) {
+  const out = new Map()
+  for (const entry of entries(sessionDir)) {
+    const req = entry.request
+    if (req?.method !== 'POST' || !/\/rest\/v1\/rpc\/[A-Za-z0-9_]+/.test(req.url ?? '')) continue
+    const headers = {}
+    for (const h of req.headers ?? []) if (h?.name && !h.name.startsWith(':')) headers[h.name.toLowerCase()] = h.value
+    if (!headers.apikey) continue
+    out.set(req.url.split('?')[0], { url: req.url.split('?')[0], headers })
+  }
+  return [...out.values()]
+}
+
+// Supabase Storage buckets the page touched (downloads, uploads, listings).
+const STORAGE = /\/storage\/v1\/object\/(?:(?:list|public|authenticated|sign|info|upload\/sign)\/)?([A-Za-z0-9_.-]+)/
+export function storageBuckets(sessionDir) {
+  const buckets = new Set()
+  for (const entry of entries(sessionDir)) {
+    const m = entry.request?.url?.match(STORAGE)
+    if (m) buckets.add(decodeURIComponent(m[1]))
+  }
+  return [...buckets]
+}
+
+// The page addresses a Kane run visited, in order, from the step records in its evidence pack.
+// Single-page apps change the address without loading a page, so the HAR alone would miss them.
+export function visitedUrls(sessionDir) {
+  const seen = []
+  if (!sessionDir || !existsSync(sessionDir)) return seen
+  for (const file of walk(sessionDir, 4)) {
+    if (!ZIP.has(extname(file).toLowerCase())) continue
+    const steps = zipEntries(file).filter((e) => /(^|\/)steps\/[^/]+\/step\.json$/.test(e))
+    const found = []
+    for (const e of steps) {
+      try {
+        const step = JSON.parse(zipRead(file, e))
+        if (typeof step.url === 'string' && /^https?:/.test(step.url)) found.push([step.ordinal ?? 0, step.url])
+      } catch {}
+    }
+    found.sort((a, b) => a[0] - b[0])
+    for (const [, url] of found) if (!seen.includes(url)) seen.push(url)
+  }
+  return seen
+}
+
 // The login a session's page used for its data reads (Authorization and cookie headers), so another
 // session's requests can be sent with it. Taken from the last authenticated read in the log.
 export function loginHeaders(sessionDir) {
