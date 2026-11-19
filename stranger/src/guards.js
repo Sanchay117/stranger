@@ -336,21 +336,18 @@ export async function runKaneGuards(cfg, { headless = true, onEvent } = {}) {
   }
 
   const results = members.map((m) => {
-    const failed = run.failures.filter((f) => f.text.includes(m.canary) || f.text.includes(m.control) || f.member?.includes(m.file.replace(/_test\.md$/, '')))
-    const text = failed.map((f) => f.text).join(' ')
-    const status = run.exitCode === 0 ? 'HOLDS' : text.includes(m.canary) && !text.includes(m.control) ? 'BROKEN' : 'UNKNOWN'
+    const k = run.members?.[m.file] ?? null
+    const { status, why } = judgeKaneGuard(m, k, run)
     return {
       probe: m.probe,
       file: m.file,
       status,
-      why:
-        status === 'HOLDS'
-          ? "Kane replayed both accounts: the stranger saw their own record and not the owner's."
-          : status === 'BROKEN'
-            ? "Kane saw the owner's record on the stranger's page again."
-            : text.includes(m.control)
-              ? 'The stranger could not see their own record, so the check means nothing this time.'
-              : `Kane did not finish: ${text || run.reason || `exit ${run.exitCode}`}`,
+      why,
+      testUrl: k?.testUrl ?? null,
+      credits: k?.credits ? Math.round(k.credits * 100) / 100 : null,
+      recorded: k?.recorded ?? null,
+      authored: k?.authored ?? null,
+      replayed: k?.replayed ?? null,
     }
   })
 
@@ -358,6 +355,32 @@ export async function runKaneGuards(cfg, { headless = true, onEvent } = {}) {
   const cleaned = await cleanUp(cfg, members)
   const secrets = filesHolding(dir, [cfg.owner.password, cfg.stranger.password])
   return { exitCode: run.exitCode, results, policy: run.policy, testUrl: run.testUrl, credits: run.credits, seconds: run.seconds, pack: run.pack, logFile, cleaned, secrets }
+}
+
+// Reads Kane's own checks on the stranger's page: the canary had to be absent and the control present.
+// The canary seen means the leak is back. The control missing means the stranger's page never loaded
+// their own data, so an absent canary would prove nothing. Falls back to the failure text when a run
+// reports no checks (a replay may only say which step failed and why).
+export function judgeKaneGuard(m, k, run) {
+  if (k?.status === 'passed' || (!k?.failure && run.exitCode === 0)) {
+    return { status: 'HOLDS', why: "Kane ran both accounts: the stranger saw their own record and not the owner's." }
+  }
+  const about = (c, mark) => [c.subject, c.condition].some((x) => typeof x === 'string' && x.includes(mark))
+  const absent = (c) => c.mustBe === 'absent' || (!c.mustBe && /\b(not|absent|never)\b/i.test(c.condition ?? ''))
+  const checks = k?.checks ?? []
+  const controlMissing = checks.some((c) => about(c, m.control) && !absent(c) && c.passed === false)
+  const canarySeen = checks.some((c) => about(c, m.canary) && absent(c) && c.passed === false)
+  const bug = k?.bugs?.at(-1)
+  const note = bug?.title ? ` Kane's bug note: "${bug.title}"${bug.confidence != null ? ` (${Math.round(bug.confidence * 100)}% sure)` : ''}.` : ''
+  const broken = { status: 'BROKEN', why: `Kane saw the owner's record on the stranger's page again.${note}` }
+  const noControl = { status: 'UNKNOWN', why: 'The stranger could not see their own record, so the check means nothing this time.' }
+  if (controlMissing) return noControl
+  if (canarySeen) return broken
+  const text = [k?.failure?.message, ...run.failures.filter((f) => !f.member || f.member.endsWith(m.file)).map((f) => f.text)].filter(Boolean).join(' ')
+  if (!checks.length && text.includes(m.canary) && !text.includes(m.control)) return broken
+  if (!checks.length && text.includes(m.control) && !text.includes(m.canary)) return noControl
+  const where = k?.failure?.step ? `step ${k.failure.step}${k.failure.heading ? ` (${k.failure.heading})` : ''}: ` : ''
+  return { status: 'UNKNOWN', why: `Kane did not finish ${where}${k?.failure?.message || text || run.reason || `exit ${run.exitCode}`}` }
 }
 
 async function cleanUp(cfg, members) {

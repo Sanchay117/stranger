@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadConfig, DEFAULT_CONFIG, TEMPLATE } from '../src/config.js'
 import { check } from '../src/check.js'
@@ -137,16 +137,33 @@ if (command === 'guard') {
   let kane = null
   if (values.kane && data.kane.length) {
     say(`\n${bold('Kane guards')} ${dim(`${data.kane.length} ${data.kane.length === 1 ? 'test' : 'tests'} with kane-cli testrun (recorded steps replay; new ones are authored first)`)}`)
+    const heads = {}
     kane = await runKaneGuards(cfg, {
       headless: !values.headed,
       onEvent: (e) => {
         const t = e.type ?? e.event
-        if (t === 'testrun_member_start' || t === 'testrun_member_end') say(`    ${dim(`${t === 'testrun_member_start' ? 'start' : 'end  '} ${e.member ?? e.name ?? e.path ?? ''} ${e.status ?? ''}`)}`)
+        const inner = e.event && typeof e.event === 'object' ? e.event : null
+        const file = String(e.path ?? e.member?.path ?? e.member ?? '').split('/').at(-1)
+        if (t === 'testrun_authored_member_start') say(`    ${dim(`${file}: Kane writes the steps first (a new or changed test)`)}`)
+        else if (t === 'testrun_member_start') say(`    ${dim(`${file}: Kane runs the test`)}`)
+        if (inner?.type === 'test_md_step_start') heads[inner.step_index] = inner.heading
+        if (inner?.type === 'test_md_step_end') say(`    ${dim(`  step ${inner.step_index} ${inner.status.padEnd(6)} ${heads[inner.step_index] ?? ''} (${Math.round(inner.duration_s ?? 0)}s)`)}`)
       },
     })
-    for (const r of kane?.results ?? []) say(`  ${paint(r.status.padEnd(7))} ${r.file} ${dim(r.why)}`)
+    for (const r of kane?.results ?? []) {
+      say(`  ${paint(r.status.padEnd(7))} ${r.file} ${dim(r.why)}`)
+      const how =
+        r.replayed && !r.authored
+          ? `replayed ${r.replayed} recorded steps`
+          : r.authored != null
+            ? `Kane wrote ${r.authored} steps${r.recorded === true ? ' and kept the recording, so later runs replay it' : r.recorded === false ? '; no recording kept (Kane keeps one only when the test passes)' : ''}`
+            : null
+      const bits = [how, r.credits != null ? `${r.credits} credits` : null, r.testUrl].filter(Boolean)
+      if (bits.length) say(dim(`          ${bits.join(', ')}`))
+    }
     if (kane) {
-      say(dim(`    ${kane.seconds}s${kane.credits != null ? `, ${kane.credits} credits` : ''}${kane.testUrl ? `, ${kane.testUrl}` : ''}`))
+      const gates = kane.policy?.result ? `policy ${kane.policy.result}${kane.policy.failedGates?.length ? ` (${kane.policy.failedGates.join(', ')})` : ''}` : null
+      say(dim(`    ${[`${kane.seconds}s`, kane.credits != null ? `${kane.credits} credits` : null, gates, kane.pack ? `evidence ${relative(process.cwd(), kane.pack) || kane.pack}` : null].filter(Boolean).join(', ')}`))
       if (kane.cleaned === false) say(yellow("    Could not delete every row the guard planted; check the owner's and the stranger's records."))
       if (kane.secrets.length) say(red(`    Kane's recordings hold a password (${kane.secrets.join(', ')}). Keep .stranger/guards/kane/output-*/ out of git.`))
     }
@@ -161,7 +178,7 @@ if (command === 'guard') {
       JSON.stringify({
         verdict,
         guards: api.map(({ id, table, method, path, status, why, tries }) => ({ id, table, method, path, status, why, tries })),
-        ...(kane ? { kane: { exitCode: kane.exitCode, results: kane.results, testUrl: kane.testUrl, credits: kane.credits } } : {}),
+        ...(kane ? { kane: { exitCode: kane.exitCode, results: kane.results, testUrl: kane.testUrl, credits: kane.credits, policy: kane.policy, pack: kane.pack, cleaned: kane.cleaned } } : {}),
       }) + '\n',
     )
   } else {

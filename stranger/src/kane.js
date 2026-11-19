@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { writeFileSync, rmSync, mkdtempSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 // Runs one Kane CLI objective in agent mode and collects its NDJSON stream.
@@ -30,29 +30,79 @@ export async function runKaneSuite({ cwd, paths, policy, headless = true, startU
   if (startUrl) args.push('--override-start-url', startUrl)
   const r = await spawnKane(args, { cwd, logFile, onEvent, timeout })
   const done = r.events.findLast((e) => kind(e) === 'testrun_done') ?? null
+  const members = {}
+  const memberOf = (path) => {
+    const key = basename(String(path))
+    return (members[key] ??= { file: key, status: null, step: null, failure: null, checks: [], bugs: [], testUrl: null, recorded: null, authored: null, replayed: null, credits: 0 })
+  }
   const failures = []
   let credits = 0
   let testUrl = null
+  let pack = null
+  let verdict = null
   for (const e of r.events) {
+    const type = kind(e)
     const inner = e.event && typeof e.event === 'object' ? e.event : e.data && typeof e.data === 'object' ? e.data : e
-    const member = [e.member, e.member_key, e.log_path, inner.member, inner.path, inner.test].find((x) => typeof x === 'string') ?? null
-    if (typeof inner.credits_consumed === 'number') credits += inner.credits_consumed
-    testUrl = inner.test_url ?? e.test_url ?? testUrl
+    const path = [e.member?.path, e.member, e.path, e.member_key, inner.member, inner.path, inner.test].find((x) => typeof x === 'string') ?? null
+    const m = path && /_test\.md$/.test(path) ? memberOf(path) : null
+    if (typeof inner.credits_consumed === 'number') {
+      credits += inner.credits_consumed
+      if (m) m.credits += inner.credits_consumed
+    }
+    testUrl = inner.share_url ?? inner.test_url ?? e.test_url ?? testUrl
+    if (m) {
+      const t = kind(inner)
+      if (t === 'test_md_step_start') m.step = { index: inner.step_index, heading: inner.heading ?? null }
+      if (t === 'run_end') {
+        // Kane's own checks for this step: what it looked for, whether it had to be there, and the outcome.
+        for (const c of Object.values(inner.context?.memory ?? {})) {
+          if (c && typeof c === 'object') m.checks.push({ step: m.step?.index ?? null, subject: c.subject ?? null, condition: c.condition ?? c.query ?? null, mustBe: c.must_be ?? null, passed: checkPassed(c) })
+        }
+        if (inner.status === 'failed') m.failure ??= { step: m.step?.index ?? null, heading: m.step?.heading ?? null, message: inner.reason ?? null }
+      }
+      if (t === 'test_md_bug_verdict' && inner.confirmed !== false) m.bugs.push({ step: inner.step_index ?? null, title: inner.bug_title ?? inner.one_liner ?? null, confidence: inner.confidence ?? null })
+      if (t === 'test_md_summary') {
+        m.recorded = inner.commit?.committed ?? null
+        m.authored = inner.steps?.author_decisions ?? null
+        m.replayed = inner.steps?.replay_decisions ?? null
+      }
+      if (t === 'test_md_summary' || t === 'test_md_done') {
+        m.testUrl = inner.share_url ?? m.testUrl
+        m.status ??= inner.overall_status ?? null
+      }
+      if (type === 'testrun_authored_member_end' || type === 'testrun_member_end') {
+        m.status = e.status ?? m.status
+        if (e.failure) m.failure = { ...m.failure, step: e.failure.step_index ?? m.failure?.step ?? null, message: e.failure.message ?? m.failure?.message ?? null }
+      }
+    }
+    if (type === 'coverage' && typeof e.pack === 'string') pack = e.pack
+    if (type === 'testrun_summary' && !pack && e.execution?.evidence_id) pack = join(cwd, '.testmuai', 'evidence', `${e.execution.evidence_id}.evidence`)
+    if (type === 'verdict') verdict = { result: e.result ?? null, failedGates: (e.policies ?? []).flatMap((p) => p.failed_gate_ids ?? []), file: e.policies?.[0]?.file ?? null }
+    // Older or shorter streams: a failed status with a message somewhere in the event.
     if (['failed', 'broken', 'fail', 'error'].includes(inner.status ?? inner.outcome)) {
-      const text = [inner.remark, inner.reason, inner.one_liner, inner.summary, inner.message, inner.error].filter((x) => typeof x === 'string').join(' ')
-      failures.push({ member, text })
+      const text = [inner.remark, inner.reason, inner.message, inner.error, e.failure?.message].filter((x) => typeof x === 'string').join(' ')
+      failures.push({ member: path, text })
     }
   }
   return {
     ...r,
     done,
+    members,
     failures,
-    credits: credits || null,
+    credits: credits ? Math.round(credits * 100) / 100 : null,
     testUrl: done?.test_url ?? testUrl,
-    pack: done?.evidence ?? done?.evidence_path ?? done?.pack ?? null,
-    policy: done?.verdicts ?? done?.verdict ?? null,
-    reason: done?.reason ?? r.spawnError ?? (r.exitCode ? r.stderrTail.trim().split('\n').at(-1) : null),
+    pack: pack ?? done?.evidence ?? null,
+    policy: verdict ?? done?.verdicts ?? null,
+    reason: done?.reason ?? r.spawnError ?? (r.exitCode && r.exitCode !== 1 ? r.stderrTail.trim().split('\n').at(-1) : null),
   }
+}
+
+// One of Kane's checks passed or failed. Its reasoning ends in "-> PASS" or "-> FAIL".
+function checkPassed(c) {
+  const verdict = /->\s*(PASS|FAIL)\s*$/.exec(c.reasoning ?? '')
+  if (verdict) return verdict[1] === 'PASS'
+  if (c.operator === 'equals' && c.extracted_value != null && c.expected_value != null) return String(c.extracted_value) === String(c.expected_value)
+  return null
 }
 
 // Starts kane-cli with stdin closed (so it never waits for an answer) and collects its NDJSON stream.

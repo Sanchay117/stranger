@@ -18,8 +18,9 @@
 //   there, so a test's stand-in API can hand it out.
 // FAKE_KANE_API: base URL the logged data reads point at (a stand-in Supabase in the tests).
 // FAKE_KANE_FORBID: a string that must never appear in argv (a password).
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
@@ -34,8 +35,15 @@ if (process.env.FAKE_KANE_FORBID && args.some((a) => a.includes(process.env.FAKE
   console.error('fake-kane: a secret was passed on the command line')
   process.exit(9)
 }
-// kane-cli testrun run <files...>: Stranger's guard tests. Logins come from Kane's variables folder in the
-// working directory. Each test plants its canary as the owner (planted.txt) and passes or fails by mode.
+// kane-cli testrun run <files...>: Stranger's guard tests, in the event shapes real Kane 0.10.5 printed.
+// Logins come from Kane's variables folder in the working directory. Each test plants its canary as the
+// owner (planted.txt) and passes or fails by mode:
+//   clean           passes: Kane's checks see the control and not the canary; the recording is kept
+//   page-leak       the real failing stream from a live run (fixtures/kane-testrun-leak.ndjson), with this
+//                   test's marks swapped in: its summary names both the canary and the control
+//   control-missing the stranger's own record is not on the page
+//   step-fail       the owner cannot log out (step 2), so the stranger's look never happens
+//   text-leak       an older, shorter stream: only a failure message naming the canary, no checks
 // FAKE_KANE_LEAK_SECRET=1 writes a password into the recordings, as a careless recorder might.
 if (args[0] === 'testrun') {
   const files = args.slice(2, args.findIndex((a, i) => i > 1 && a.startsWith('--')))
@@ -47,33 +55,75 @@ if (args[0] === 'testrun') {
   const mode = (process.env.FAKE_KANE_MODES ?? 'clean').split(',')[0]
   appendFileSync(join(out, 'calls.log'), `testrun ${files.join(' ')} ${mode}\n`)
   appendFileSync(join(out, 'testrun-args.log'), args.join(' ') + '\n')
-  emit({ type: 'stream_start' })
-  emit({ type: 'testrun_plan', members: files })
-  let failed = false
+  const v = { v: 1 }
+  emit({ type: 'stream_start', cli_version: '0.10.5', surface: 'testrun', ...v })
+  emit({ type: 'testrun_plan', members: files.map((path) => ({ path: join(process.cwd(), path), tags: ['stranger', 'guard'] })), valid: true, parallel: 1, ...v })
+  const check = (subject, mustBe, seen) => ({
+    subject: `the text "${subject}"`,
+    condition: mustBe === 'absent' ? `the text "${subject}" does not appear anywhere on the page` : `the text "${subject}" is visible on the page`,
+    must_be: mustBe,
+    operator: 'equals',
+    extracted_value: String(seen),
+    expected_value: String(mustBe === 'present'),
+    reasoning: `value: '${seen}' -> '${seen}'; equals '${mustBe === 'present'}' -> ${seen === (mustBe === 'present') ? 'PASS' : 'FAIL'}`,
+  })
+  let failed = 0
   for (const file of files) {
-    const text = readFileSync(join(process.cwd(), file), 'utf8')
+    const path = join(process.cwd(), file)
+    const text = readFileSync(path, 'utf8')
     const canary = text.match(/stranger-guard-[0-9a-f]{6}/)[0]
     const control = text.match(/stranger-own-[0-9a-f]{6}/)[0]
+    const heads = [...text.matchAll(/^## (.+)$/gm)].map((m) => m[1])
     appendFileSync(join(out, 'planted.txt'), `${canary}\n`)
     const stem = file.replace(/_test\.md$/, '')
-    mkdirSync(join(process.cwd(), `output-${stem}`, '.internal'), { recursive: true })
-    writeFileSync(join(process.cwd(), `output-${stem}`, 'Result.md'), `---\ntest: ${stem}\nstatus: done\n---\n`)
-    writeFileSync(join(process.cwd(), `output-${stem}`, '.internal', 'steps.json'), JSON.stringify({ typed: process.env.FAKE_KANE_LEAK_SECRET ? pool.owner_password.value : '{{owner_password}}' }))
-    emit({ type: 'testrun_member_start', member: file })
-    emit({ type: 'testrun_member_event', member: file, event: { step: 1, status: 'done', remark: `type: ${canary} into Note` } })
-    let status = 'passed'
+    const outDir = join(process.cwd(), `output-${stem}`)
+    mkdirSync(join(outDir, '.internal'), { recursive: true })
+    writeFileSync(join(outDir, 'Result.md'), `---\ntest: ../${file}\nstatus: ${mode === 'clean' ? 'passed' : 'failed'}\n---\n`)
+    writeFileSync(join(outDir, '.internal', 'execution.json'), JSON.stringify({ typed: process.env.FAKE_KANE_LEAK_SECRET ? pool.owner_password.value : '{{owner_password}}' }))
+    failed++
     if (mode === 'page-leak') {
-      emit({ type: 'testrun_member_event', member: file, event: { step: 9, status: 'failed', remark: `assert: the text "${canary}" does not appear anywhere on the page` } })
-      status = 'failed'
-    } else if (mode === 'control-missing') {
-      emit({ type: 'testrun_member_event', member: file, event: { step: 8, status: 'failed', remark: `assert: the text "${control}" is visible on the page` } })
-      status = 'failed'
+      const real = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'kane-testrun-leak.ndjson'), 'utf8')
+      for (const line of real.split('\n').filter(Boolean)) {
+        const e = JSON.parse(line.replaceAll('stranger-guard-b661da', canary).replaceAll('stranger-own-b661da', control).replaceAll('main_test.md', file))
+        if (['stream_start', 'testrun_plan', 'verdict', 'coverage', 'testrun_summary', 'testrun_done', 'testrun_evidence_ingest'].includes(e.type)) continue
+        emit(e)
+      }
+      continue
     }
-    failed ||= status !== 'passed'
-    emit({ type: 'testrun_member_end', member: file, status, credits_consumed: 0.25 })
+    if (mode === 'text-leak') {
+      emit({ type: 'testrun_member_start', path: file, ...v })
+      emit({ type: 'testrun_member_end', path: file, status: 'failed', failure: { message: `Final verification failed: "the text "${canary}" does not appear anywhere on the page"` }, ...v })
+      continue
+    }
+    const recorded = existsSync(join(outDir, '.internal', 'committed'))
+    const member = { index: 0, path }
+    const inner = (event) => emit({ type: 'testrun_member_event', member, event: { ...event, ...v }, ...v })
+    emit({ type: recorded ? 'testrun_member_start' : 'testrun_authored_member_start', path, ...v })
+    const failAt = mode === 'step-fail' ? 2 : mode === 'control-missing' ? 4 : 0
+    let reason = null
+    for (let i = 1; i <= 4; i++) {
+      inner({ type: 'test_md_step_start', step_index: i, heading: heads[i - 1] ?? null })
+      const memory = i === 1 ? { a: check(canary, 'present', true) } : i === 4 ? { a: check(control, 'present', mode !== 'control-missing'), b: check(canary, 'absent', false) } : {}
+      const bad = i === failAt
+      reason = bad ? (i === 2 ? 'Could not find a way to log out' : `Final verification failed: "the text "${control}" is visible on the page"`) : null
+      inner({ type: 'run_end', status: bad ? 'failed' : 'passed', reason: reason ?? 'Objective completed', context: { memory: bad || i !== 2 ? memory : {} }, credits_consumed: recorded ? 0.5 : 6 })
+      inner({ type: 'test_md_step_end', step_index: i, status: bad ? 'failed' : 'passed', duration_s: 5 })
+      if (bad) break
+    }
+    const ok = !failAt
+    if (ok) {
+      failed--
+      writeFileSync(join(outDir, '.internal', 'committed'), '')
+    }
+    inner({ type: 'test_md_summary', overall_status: ok ? 'passed' : 'failed', steps: { total: 4, replay_decisions: recorded ? 4 : 0, author_decisions: recorded ? 0 : 4 }, commit: { committed: ok, ...(ok ? {} : { reason: 'run_failed' }) }, share_url: 'https://kane.example/share/guard' })
+    inner({ type: 'test_md_done', overall_status: ok ? 'passed' : 'failed', share_url: 'https://kane.example/share/guard' })
+    emit({ type: recorded ? 'testrun_member_end' : 'testrun_authored_member_end', path: file, status: ok ? 'passed' : 'failed', ...(ok ? {} : { failure: { message: reason, step_index: failAt } }), ...v })
   }
-  emit({ type: 'testrun_summary', passed: failed ? 0 : files.length, failed: failed ? files.length : 0 })
-  emit({ type: 'testrun_done', status: failed ? 'failed' : 'passed', test_url: 'https://kane.example/testrun/1' })
+  const pack = join(process.cwd(), '.testmuai', 'evidence', 'run-1.evidence')
+  emit({ type: 'coverage', status: 'skipped', reason: 'not_assurance_project', pack, ...v })
+  emit({ type: 'verdict', result: failed ? 'fail' : 'pass', exit_code: failed ? 1 : 0, policies: [{ id: 'stranger-guard', result: failed ? 'fail' : 'pass', failed_gate_ids: failed ? ['no-leak-came-back'] : [] }], ...v })
+  emit({ type: 'testrun_summary', execution: { id: 'run-1', status: failed ? 'failed' : 'passed', evidence_id: 'run-1' }, totals: { tests: files.length, passed: files.length - failed, failed, broken: 0 }, ...v })
+  emit({ type: 'testrun_done', execution_id: 'run-1', overall_status: failed ? 'failed' : 'passed', ...v })
   process.exit(failed ? 1 : 0)
 }
 

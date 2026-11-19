@@ -983,13 +983,36 @@ test('Kane guards: replayed with kane-cli testrun and a verdict policy; logins s
   assert.ok(!existsSync(join(dir, '.testmuai', 'variables', 'stranger-guard.json')), 'the logins file is deleted after the run')
   assert.ok(!api.rows.some((row) => row.note === canary), "the guard's canary row is deleted again")
   assert.equal(guardsFile(p).kane[0].state, 'fixed')
+  assert.equal(ok.out.kane.results[0].authored, 4, 'the first run writes the steps')
+  assert.equal(ok.out.kane.results[0].recorded, true)
+  assert.equal(ok.out.kane.policy.result, 'pass')
+  assert.match(ok.out.kane.pack, /\.testmuai\/evidence\/run-1\.evidence$/)
 
+  const again = await guard(p, ['--kane'], 'clean')
+  assert.equal(again.out.kane.results[0].status, 'HOLDS')
+  assert.equal(again.out.kane.results[0].replayed, 4, 'a kept recording is replayed')
+  assert.equal(again.out.kane.results[0].authored, 0)
+
+  // Real Kane's failing step names both marks ("the screen also shows the expected stranger-own-..."),
+  // so the verdict must come from its checks, not from which mark the text mentions.
   const broke = await guard(p, ['--kane'], 'page-leak')
   assert.equal(broke.code, 1)
   assert.equal(broke.out.kane.results[0].status, 'BROKEN')
+  assert.match(broke.out.kane.results[0].why, /Kane's bug note: "Unauthorized guard invoice appears in Your invoices" \(98% sure\)/)
+  assert.equal(broke.out.kane.results[0].recorded, false)
+  assert.equal(guardsFile(p).kane[0].state, 'open')
+  assert.equal(guardsFile(p).kane[0].reopened.by, 'guard')
 
   const unsure = await guard(p, ['--kane'], 'control-missing')
   assert.equal(unsure.out.kane.results[0].status, 'UNKNOWN')
+  assert.match(unsure.out.kane.results[0].why, /could not see their own record/)
+
+  const stuck = await guard(p, ['--kane'], 'step-fail')
+  assert.equal(stuck.code, 2)
+  assert.match(stuck.out.kane.results[0].why, /^Kane did not finish step 2 \(The owner logs out\): Could not find a way to log out/)
+
+  const short = await guard(p, ['--kane'], 'text-leak')
+  assert.equal(short.out.kane.results[0].status, 'BROKEN', 'a stream with only a failure message still counts')
 
   const careless = await spawnAsync([BIN, 'guard', '--kane'], { cwd: p.root, env: env(p, 'clean', { SUPABASE_URL: API, SUPABASE_ANON_KEY: 'public-anon-key', FAKE_KANE_LEAK_SECRET: '1' }) })
   assert.match(careless.stderr, /recordings hold a password/)
