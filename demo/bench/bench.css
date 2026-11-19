@@ -1,0 +1,10 @@
+/* Bench additions on top of Duebook's styles. */
+.open-note { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 16px; border-color: var(--accent); }
+.live { margin: 4px 0; }
+.files { margin: 0; padding-left: 20px; font-size: 0.85rem; color: var(--muted); }
+.bench .score { margin: 8px 0 20px; }
+.bench .score p { margin: 0 0 4px; }
+.bench .card a { color: inherit; }
+.bench .card .link { color: var(--accent); margin-right: 12px; }
+.bench .card p { margin: 0; }
+.limits { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); }
