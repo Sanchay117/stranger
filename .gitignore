@@ -6,6 +6,11 @@ HACKATHON.md
 .stranger/armed
 .stranger/hook-state.json
 .stranger/last.json
+# The same inside the bench case folders (bench/cases/<case>/.stranger/)
+**/.stranger/runs/
+**/.stranger/armed
+**/.stranger/hook-state.json
+**/.stranger/last.json
 
 # Kane CLI writes test files here, with variable values (passwords) in plain text
 .testmuai/
