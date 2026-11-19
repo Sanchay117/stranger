@@ -136,7 +136,7 @@ The bench is one small notes app with ten cases on one Supabase project. Each ca
 
 - Scorecard with Kane run links: https://stranger-2yf3.vercel.app/bench/ (and [`bench/README.md`](bench/README.md))
 - Each case's report and fix brief: [`bench/cases/`](bench/cases/)
-- Try a case yourself, as the owner or the stranger: https://stranger-2yf3.vercel.app/bench/?case=detail_page
+- Try a case yourself, one click, no sign-up: [as Maya, the owner](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=owner) or [as a stranger](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=stranger). Open one of Maya's notes, copy its address, and open it as the stranger.
 
 ## Gate pull requests (GitHub + Vercel)
 

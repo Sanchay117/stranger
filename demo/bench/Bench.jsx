@@ -75,6 +75,16 @@ function Auth({ c }) {
     if (error) setMessage(error.message)
   }
 
+  // ?as=owner or ?as=stranger logs straight in, like Duebook. The case stays in the address.
+  useEffect(() => {
+    const p = params()
+    const as = p.get('as')
+    if (!DEMO[as]?.email) return
+    p.delete('as')
+    window.history.replaceState(null, '', `${window.location.pathname}?${p}`)
+    logIn({ email: DEMO[as].email, password: DEMO[as].password })
+  }, [])
+
   return (
     <main className="auth">
       <h1 className="logo">Notes</h1>
