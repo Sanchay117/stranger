@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { bindSwitch } from '../site/theme.js'
+import { Halftone, SkyPanel } from './Art.jsx'
 import { supabase, configured } from './supabase'
 
 const money = (cents, currency = 'USD') =>
@@ -97,44 +98,49 @@ function Auth() {
   }, [])
 
   return (
-    <main className="auth">
-      <h1 className="logo">Duebook</h1>
-      <p className="tagline">Send invoices. Get paid on time.</p>
+    <div className="auth-page">
+      <SkyPanel head={<h1 className="logo">Duebook</h1>}>
+        <p className="tagline">
+          Send invoices. <em>Get paid on time.</em>
+        </p>
+      </SkyPanel>
 
-      <div className="demo">
-        {Object.entries(DEMO).map(([key, d]) =>
-          d.email ? (
-            <button key={key} className={key === 'stranger' ? 'primary' : 'secondary'} disabled={busy} onClick={() => logIn({ email: d.email, password: d.password })}>
-              {d.label}
-            </button>
-          ) : null,
-        )}
-        <p className="muted small">Maya has a few invoices. The stranger has none of their own, so anything they see belongs to someone else.</p>
-      </div>
+      <main className="auth">
+        <div className="demo">
+          {Object.entries(DEMO).map(([key, d]) =>
+            d.email ? (
+              <button key={key} className={key === 'stranger' ? 'primary' : 'secondary'} disabled={busy} onClick={() => logIn({ email: d.email, password: d.password })}>
+                {d.label}
+              </button>
+            ) : null,
+          )}
+          <p className="muted small">Maya has a few invoices. The stranger has none of their own, so anything they see belongs to someone else.</p>
+        </div>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          logIn({ email, password })
-        }}
-        className="card"
-        aria-label="Log in with email"
-      >
-        <p className="muted small">Or log in with email</p>
-        <label>
-          Email
-          <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </label>
-        <label>
-          Password
-          <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-        </label>
-        <button className="primary" disabled={busy}>
-          {busy ? 'One moment' : 'Log in'}
-        </button>
-      </form>
-      {message && <p className="message">{message}</p>}
-    </main>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            logIn({ email, password })
+          }}
+          className="card"
+          aria-label="Log in with email"
+        >
+          <p className="muted small">Or log in with email</p>
+          <label>
+            Email
+            <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <label>
+            Password
+            <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          <button className="primary" disabled={busy}>
+            {busy ? 'One moment' : 'Log in'}
+          </button>
+        </form>
+        {message && <p className="message">{message}</p>}
+      </main>
+    </div>
   )
 }
 
@@ -197,7 +203,8 @@ function Invoices({ session }) {
       </header>
 
       <main>
-        <section className="summary">
+        <section className="summary halftone">
+          <Halftone seed={3} />
           <div>
             <p className="muted">Outstanding</p>
             <p className="big">{money(outstanding)}</p>
