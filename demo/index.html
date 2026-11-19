@@ -8,7 +8,7 @@
 <meta property="og:title" content="Stranger">
 <meta property="og:description" content="You test your app as yourself. Stranger tests it as someone else.">
 <meta property="og:image" content="/proof/stranger-sees-canary.jpg">
-<meta name="theme-color" content="#f3f1ec">
+<meta name="theme-color" content="#f6f5f1">
 <script>
   // Pick the theme before anything paints: a saved choice, else the system setting.
   try { var t = localStorage.getItem('stranger-theme') } catch (e) {}
@@ -17,86 +17,138 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23ffb020'/%3E%3Ccircle cx='20' cy='13' r='2.4' fill='%23141a2e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..600&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&family=Geist+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,300..500;1,6..72,300..500&display=swap">
 <link rel="stylesheet" href="/site/site.css">
 <link rel="stylesheet" href="/site/theme.css">
 </head>
 <body>
-<header class="nav">
-  <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>Stranger</a>
-  <div class="nav-end">
-    <nav>
-      <a href="#proof">See the leak</a>
-      <a href="#how">How it works</a>
-      <a href="https://github.com/Sanchay117/stranger">GitHub</a>
-    </nav>
-    <button class="theme-switch" type="button" role="switch" aria-checked="false" aria-label="Dark mode" data-theme-switch>
-      <span class="ts-stars" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="ts-knob" aria-hidden="true"></span>
-    </button>
-  </div>
-</header>
 
-<main>
-<section class="hero">
-  <div class="hero-inner">
-    <a class="eyebrow rise" href="https://nvd.nist.gov/vuln/detail/CVE-2025-48757" target="_blank" rel="noopener">
-      170 of 1,645 Lovable apps let a stranger read other users' data <span aria-hidden="true">↗</span>
-    </a>
-    <h1 class="rise">You test your app as yourself.<span class="accent">Stranger tests it as someone else.</span></h1>
-    <p class="lede rise">Kane CLI signs in as a second user and goes looking for the first user's data. If it finds any, your coding agent fixes the database and Kane looks again.</p>
+<div class="sky-frame" id="sky-frame">
+  <canvas class="sky" id="sky" aria-hidden="true"></canvas>
 
-    <div class="stage rise">
-      <div class="blob" id="blob" aria-hidden="true"></div>
+  <header class="nav">
+    <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>Stranger</a>
+    <div class="nav-end">
+      <nav aria-label="Page">
+        <a href="#proof">See the leak</a>
+        <a href="#how">How it works</a>
+        <a href="/bench/">Bench</a>
+        <a href="https://github.com/Sanchay117/stranger">GitHub</a>
+      </nav>
+      <button class="theme-switch" type="button" role="switch" aria-checked="false" aria-label="Dark mode" data-theme-switch>
+        <span class="ts-stars" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="ts-knob" aria-hidden="true"></span>
+      </button>
+      <a class="nav-cta" href="/duebook/?as=stranger" target="_blank" rel="noopener">Open as a stranger</a>
+    </div>
+  </header>
 
-      <form class="composer glass" id="composer" autocomplete="off">
-        <label class="sr" for="app">Your app's address</label>
-        <span class="scheme" aria-hidden="true">https://</span>
-        <input id="app" spellcheck="false" placeholder="your-app.lovable.app">
-        <button class="go" type="submit">Send in a stranger <span aria-hidden="true">→</span></button>
-      </form>
+  <section class="hero">
+    <div class="hero-copy" id="hero-copy">
+      <a class="eyebrow rise" href="https://nvd.nist.gov/vuln/detail/CVE-2025-48757" target="_blank" rel="noopener">
+        <span class="eyebrow-dot" aria-hidden="true"></span>170 of 1,645 Lovable apps let a stranger read other users' data <span aria-hidden="true">↗</span>
+      </a>
+      <h1 class="rise">You test your app as yourself. <em>Stranger tests it as <span>someone else.</span></em></h1>
+      <p class="lede rise">Kane CLI signs in as a second user and goes looking for the first user's data. If it finds any, your coding agent fixes the database and Kane looks again.</p>
 
-      <div class="mode glass" role="radiogroup" aria-label="When Stranger finds a leak">
-        <button type="button" role="radio" aria-checked="true" data-mode="tell">Just tell me</button>
-        <button type="button" role="radio" aria-checked="false" data-mode="fix">Let my agent fix it</button>
-      </div>
+      <div class="stage rise">
+        <form class="composer" id="composer" autocomplete="off">
+          <label class="sr" for="app">Your app's address</label>
+          <span class="scheme" aria-hidden="true">https://</span>
+          <input id="app" spellcheck="false" placeholder="your-app.lovable.app">
+          <button class="go" type="submit">Send in a stranger <span aria-hidden="true">→</span></button>
+        </form>
 
-      <div class="try">
-        <span class="try-label">Look for</span>
-        <div class="chips" id="chips"></div>
+        <div class="under">
+          <div class="mode" role="radiogroup" aria-label="When Stranger finds a leak">
+            <button type="button" role="radio" aria-checked="true" data-mode="tell">Just tell me</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="fix">Let my agent fix it</button>
+          </div>
+        </div>
+
+        <div class="try">
+          <span class="try-label">Look for</span>
+          <div class="chips" id="chips"></div>
+        </div>
       </div>
     </div>
 
-    <div class="console" id="console" hidden aria-live="polite"></div>
-  </div>
+    <figure class="tear rise" aria-labelledby="tear-cap">
+      <div class="tear-art">
+        <svg class="tear-svg" id="tear" viewBox="-40 -30 860 590" role="img" aria-label="Kane's screenshot of Duebook signed in as stranger@duebook.demo. The stranger's own test invoice is at the top, and directly below it is Maya's invoice holding the canary stranger-canary-afb57e.">
+          <defs>
+            <clipPath id="tear-hole"><path id="tear-in" d="M-4 6Q-4 -6 8 -6H772Q784 -6 784 6V526Q784 538 772 538H8Q-4 538 -4 526Z"/></clipPath>
+            <filter id="tear-soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
+          </defs>
+          <path class="tear-rim-2" id="tear-out-2" d="M-22 -10Q-22 -22 -10 -22H790Q802 -22 802 -10V542Q802 554 790 554H-10Q-22 554 -22 542Z"/>
+          <path class="tear-rim" id="tear-out" d="M-18 -14Q-18 -24 -8 -24H788Q798 -24 798 -14V538Q798 548 788 548H-8Q-18 548 -18 538Z"/>
+          <g clip-path="url(#tear-hole)">
+            <rect x="-40" y="-30" width="860" height="590" fill="#faf8f4"/>
+            <image class="tear-shot" href="/proof/stranger-sees-canary.jpg" x="0" y="0" width="780" height="860"/>
+            <rect class="m-control" x="30" y="182" width="720" height="168" rx="18"/>
+            <rect class="m-canary" x="30" y="343" width="720" height="168" rx="18"/>
+            <path class="tear-shade" id="tear-shade" d="M-4 6Q-4 -6 8 -6H772Q784 -6 784 6V526Q784 538 772 538H8Q-4 538 -4 526Z" filter="url(#tear-soft)"/>
+          </g>
+        </svg>
+        <span class="tear-label tear-label-control" aria-hidden="true">the stranger's own invoice</span>
+        <span class="tear-label tear-label-canary" aria-hidden="true">Maya's canary</span>
+      </div>
+      <figcaption class="tear-chip" id="tear-cap">
+        <span class="tag leak">LEAK</span>
+        <span>Kane's own screenshot, signed in as <b>stranger@duebook.demo</b>. <a class="kane-run" href="#" target="_blank" rel="noopener">Open the run ↗</a></span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <div class="console" id="console" hidden aria-live="polite"></div>
+</div>
+
+<main>
+<section class="stack" aria-labelledby="stack-label">
+  <p class="stack-label" id="stack-label">Built on Kane CLI. Fits the stack you already ship with.</p>
+  <ul class="stack-row">
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5 6 8l-3.5 3.5M8 12h5.5"/></svg>Kane CLI</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M2.6 11.1l10.8-6.2"/></svg>Claude Code</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg>Supabase</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14.2c-2.6 0-4.4-1.8-4.4-4.2 0-2.7 2.4-3.8 2.6-7.2 2 1.2 2.4 3 2.2 4.4.8-.4 1.4-1.2 1.5-2 1.6 1.4 2.5 3 2.5 4.8 0 2.4-1.8 4.2-4.4 4.2Z"/></svg>Firebase</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13.6S2 10.2 2 6.1A3.1 3.1 0 0 1 8 4.6a3.1 3.1 0 0 1 6 1.5c0 4.1-6 7.5-6 7.5Z"/></svg>Lovable</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.2 1.6 3.6 9h4.2l-1 5.4L12.4 7H8.2l1-5.4Z"/></svg>Bolt</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4 14 13.2H2L8 2.4Z"/></svg>Vercel</li>
+    <li><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M6.6 5.6 10.4 8l-3.8 2.4V5.6Z"/></svg>GitHub Actions</li>
+  </ul>
+</section>
+
+<section class="band" id="what" aria-labelledby="what-label">
+  <p class="band-kicker" id="what-label"><span class="eyebrow-dot" aria-hidden="true"></span>What it does</p>
+  <p class="band-text">Stranger <span class="band-mark" aria-hidden="true"><i></i><i></i></span> signs in to your app as a second account and goes looking for the first account's data, <span class="dim">on the page, in what the server sends, and with no login at all. Then it hands your coding agent the fix and checks again.</span></p>
+  <dl class="stats">
+    <div><dt>170 of 1,645</dt><dd>Lovable apps let a stranger read other users' data (<a href="https://nvd.nist.gov/vuln/detail/CVE-2025-48757">CVE-2025-48757</a>)</dd></div>
+    <div><dt>9 of 9</dt><dd>bug classes caught on the <a href="/bench/">Stranger bench</a>, and the clean control stayed CLEAN</dd></div>
+    <div><dt>4 min</dt><dd>for a full check with two real Kane CLI runs, about 50 credits</dd></div>
+  </dl>
 </section>
 
 <section class="proof" id="proof">
-  <h2 class="rise">It found one. You can see it too.</h2>
-  <p class="section-lede rise">Duebook is a small invoicing app with the bug AI app builders ship most: the database lets every account read every row. Nobody notices, because nobody uses their own app as somebody else.</p>
-  <div class="proof-grid">
-    <figure class="shot rise">
-      <div class="shot-frame">
-        <img src="/proof/stranger-sees-canary.jpg" width="780" height="860" alt="Kane's screenshot of Duebook signed in as stranger@duebook.demo. The stranger's own test invoice is at the top, and directly below it is Maya's invoice holding the canary stranger-canary-afb57e.">
-        <span class="mark mark-control" aria-hidden="true">the stranger's own invoice</span>
-        <span class="mark mark-canary" aria-hidden="true">Maya's canary</span>
-      </div>
-      <figcaption>Kane's own screenshot from the failing check, signed in as <b>stranger@duebook.demo</b>. <a id="kane-run" href="#" target="_blank" rel="noopener">Open Kane's run page ↗</a></figcaption>
-    </figure>
+  <div class="proof-copy">
+    <p class="kicker">Live, and broken on purpose</p>
+    <h2>It found one. You can see it too.</h2>
+    <p class="section-lede">Duebook is a small invoicing app with the bug AI app builders ship most: the database lets every account read every row. Nobody notices, because nobody uses their own app as somebody else.</p>
+    <div class="row">
+      <a class="btn btn-primary" href="/duebook/?as=stranger" target="_blank" rel="noopener">Open as a stranger</a>
+      <a class="btn btn-quiet" href="/duebook/?as=owner" target="_blank" rel="noopener">Open as Maya</a>
+    </div>
+    <ul class="facts">
+      <li><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 14c.6-2.6 2.6-4 5-4s4.4 1.4 5 4"/></svg><b>No sign-up</b><span>One click logs you in as either account.</span></li>
+      <li><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2" width="11" height="12" rx="2"/><path d="M5 6h6M5 9h6M5 12h3"/></svg><b>Maya's real-looking data</b><span>Her invoices, her clients, the bank account in her notes.</span></li>
+      <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8s2.2-4.5 6-4.5S14 8 14 8s-2.2 4.5-6 4.5S2 8 2 8Z"/><circle cx="8" cy="8" r="1.8"/></svg><b>Kane's own proof</b><span><a class="kane-run" href="#" target="_blank" rel="noopener">Open Kane's run page ↗</a></span></li>
+      <li><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v6.5a2.5 2.5 0 0 0 5 0V8M10 3v2M11 13l2-2-2-2M13 11H9"/></svg><b>Stays leaky</b><span>Fixes live on their own branch, so you can always check.</span></li>
+    </ul>
+  </div>
 
-    <div class="proof-side">
-      <div class="card rise">
-        <p class="kicker">Live, and broken on purpose</p>
-        <h3>Open Duebook as a stranger</h3>
-        <p>One click, no sign-up. You will see Maya's invoices, her clients and the bank account in her notes.</p>
-        <div class="row">
-          <a class="btn btn-ink" href="/duebook/?as=stranger" target="_blank" rel="noopener">Open as a stranger</a>
-          <a class="btn btn-quiet" href="/duebook/?as=owner" target="_blank" rel="noopener">Open as Maya</a>
-        </div>
-      </div>
-      <div class="card rise">
-        <p class="kicker">What your agent gets</p>
-        <h3>A fix brief, not a vague warning</h3>
+  <div class="art-card">
+    <canvas class="art" data-seed="7" aria-hidden="true"></canvas>
+    <div class="float-card">
+      <p class="float-head"><span class="dot"></span>What your agent gets</p>
 <pre class="brief"><code><span class="c"># .stranger/FIX.md (excerpt)</span>
 Tables the stranger's page read: invoices
 
@@ -107,40 +159,141 @@ Tables the stranger's page read: invoices
   <span class="k">using</span> ((select auth.uid()) = user_id);
 
 Done means: stranger run prints CLEAN.</code></pre>
-        <a class="link" href="https://github.com/Sanchay117/stranger/blob/main/.stranger/FIX.md" target="_blank" rel="noopener">Read the whole brief ↗</a>
-      </div>
+      <a class="link" href="https://github.com/Sanchay117/stranger/blob/main/.stranger/FIX.md" target="_blank" rel="noopener">Read the whole brief ↗</a>
     </div>
   </div>
 </section>
 
 <section class="how" id="how">
-  <h2 class="rise">One command. Two accounts. A fresh canary every run.</h2>
-  <div class="panel rise">
-    <div class="tabs" role="tablist" aria-label="How Stranger works">
-      <button role="tab" aria-selected="true" aria-controls="tab-checks" id="t-checks">Checks</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-agent" id="t-agent" tabindex="-1">Your agent</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-ci" id="t-ci" tabindex="-1">CI</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-setup" id="t-setup" tabindex="-1">Setup</button>
+  <div class="how-head">
+    <h2>One command. Two accounts. A fresh canary every run.</h2>
+    <p>Stranger drives Kane CLI through your app twice, once as the owner and once as someone else, then asks the server directly. Every step is a real browser run with a public page anyone can open.</p>
+  </div>
+
+  <div class="bento">
+    <article class="tile">
+      <canvas class="art" data-seed="1" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini">
+          <p class="mini-head"><span class="dot ok"></span>Kane · maya@duebook.demo</p>
+          <p class="mini-row"><span class="mk ok">✓</span>Log in</p>
+          <p class="mini-row"><span class="mk ok">✓</span>Saves <code class="canary">stranger-canary-afb57e</code></p>
+          <p class="mini-row"><span class="mk ok">✓</span>The canary is on her page</p>
+        </div>
+      </div>
+      <h3>The owner plants a canary</h3>
+      <p>Kane signs in as your real first account and saves a random string nobody else should ever see.</p>
+    </article>
+
+    <article class="tile">
+      <canvas class="art" data-seed="2" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini">
+          <p class="mini-head"><span class="dot bad"></span>Kane · stranger@duebook.demo</p>
+          <p class="mini-row split"><span>On the stranger's page</span><b class="saw">saw it</b></p>
+          <p class="mini-row split"><span>Its own reads, sent again</span><b class="saw">saw it</b></p>
+          <p class="mini-row split"><span>The same reads, no login</span><b class="saw">saw it</b></p>
+          <p class="mini-foot"><span class="tag leak">LEAK</span>run 6541c9</p>
+        </div>
+      </div>
+      <h3>A stranger goes looking</h3>
+      <p>A second account checks its own control first, so an empty page can never pass. Any sight of the canary is a leak.</p>
+    </article>
+
+    <article class="tile">
+      <canvas class="art" data-seed="3" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini mini-code">
+<pre><code><span class="c">-- 0002_invoices_owner_read.sql</span>
+<span class="k">create policy</span>
+  "Users can read their own invoices"
+  <span class="k">on</span> public.invoices <span class="k">for select</span>
+  <span class="k">to</span> authenticated
+  <span class="k">using</span> ((select auth.uid()) = user_id);</code></pre>
+        </div>
+      </div>
+      <h3>Your agent gets the fix</h3>
+      <p>The brief names the table, the open policy and the migration to write. Filtering rows in the page is ruled out.</p>
+    </article>
+
+    <article class="tile">
+      <canvas class="art" data-seed="4" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini loop">
+          <p class="mini-row"><span class="tag leak">LEAK</span>f5b2cc, found by Kane</p>
+          <p class="mini-row"><span class="tag agent">AGENT</span>writes and applies the migration</p>
+          <p class="mini-row"><span class="tag clean">CLEAN</span>c789a7, checked by Kane</p>
+        </div>
+      </div>
+      <h3>It can't stop until CLEAN</h3>
+      <p>A Claude Code Stop hook runs Stranger whenever the agent thinks it is done. On a leak, the brief goes straight back.</p>
+    </article>
+
+    <article class="tile">
+      <canvas class="art" data-seed="5" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini bench">
+          <p class="mini-head"><span class="dot ok"></span>Stranger bench · 9 of 9</p>
+          <ul>
+            <li>RLS off</li><li>Page-only filter</li><li>Leaky view</li>
+            <li>Leaky function</li><li>Record page</li><li>Forged insert</li>
+            <li>Leaky total</li><li>Open files</li><li>Public channel</li>
+          </ul>
+          <p class="mini-foot"><span class="tag clean">CLEAN</span>on the control, as it should</p>
+        </div>
+      </div>
+      <h3>Nine ways to leak, all caught</h3>
+      <p>Ten small apps, each with one bug class left in. <a href="/bench/">See the scorecard and every Kane run</a>.</p>
+    </article>
+
+    <article class="tile">
+      <canvas class="art" data-seed="6" aria-hidden="true"></canvas>
+      <div class="ui">
+        <div class="mini mini-code">
+<pre><code><span class="c">$ npx github:Sanchay117/stranger run</span>
+<span class="bad">LEAK</span>  Signed in as stranger@duebook.demo,
+      Kane found the owner's canary
+      on the page.
+      Fix brief for your coding agent:
+      <span class="s">.stranger/FIX.md</span>
+<span class="c">$ echo $?</span>
+1</code></pre>
+        </div>
+      </div>
+      <h3>One command, any pipeline</h3>
+      <p>Exit codes, one JSON line with <code>--json</code>, a history file and a PR gate for CI.</p>
+    </article>
+  </div>
+
+  <div class="details">
+    <div class="details-head">
+      <h3>The details</h3>
+      <div class="tabs" role="tablist" aria-label="How Stranger works">
+        <button role="tab" aria-selected="true" aria-controls="tab-checks" id="t-checks">Checks</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-agent" id="t-agent" tabindex="-1">Your agent</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-ci" id="t-ci" tabindex="-1">CI</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-setup" id="t-setup" tabindex="-1">Setup</button>
+      </div>
     </div>
-    <ul role="tabpanel" id="tab-checks" aria-labelledby="t-checks">
+    <ul class="panel" role="tabpanel" id="tab-checks" aria-labelledby="t-checks">
       <li><b>The owner plants a canary.</b> Kane signs in as your real first account and saves a random string like <code>stranger-canary-afb57e</code>.</li>
       <li><b>A second account looks for it.</b> Kane signs in as someone else, saves its own control, and checks the control is there, so an empty page can't pass.</li>
       <li><b>Any sight of the canary is a leak.</b> On the page, or in what the server sends: Stranger replays the stranger's own data requests, then again with no login at all.</li>
       <li><b>New canary every run.</b> Old data can't fake a pass, and a fix has to really hold.</li>
     </ul>
-    <ul role="tabpanel" id="tab-agent" aria-labelledby="t-agent" hidden>
+    <ul class="panel" role="tabpanel" id="tab-agent" aria-labelledby="t-agent" hidden>
       <li><b>A Claude Code skill.</b> Tells the agent to run Stranger after touching auth or data, and how to act on each verdict. <code>stranger install-claude</code> adds it and the hook.</li>
       <li><b>A Stop hook.</b> While armed, the agent can't call the work done until Stranger says CLEAN. On a leak it gets the brief back.</li>
       <li><b>Fixes go to the database.</b> The brief names the table and the policy. Filtering rows in the page is ruled out, because the data would still reach the browser.</li>
       <li><b>It knows when to stop.</b> Three tries, then it hands over to a person with the report.</li>
     </ul>
-    <ul role="tabpanel" id="tab-ci" aria-labelledby="t-ci" hidden>
+    <ul class="panel" role="tabpanel" id="tab-ci" aria-labelledby="t-ci" hidden>
       <li><b>Exit codes.</b> 0 clean, 1 leak, 2 inconclusive, 3 setup error.</li>
       <li><b>One JSON line</b> with <code>--json</code>, for any agent or pipeline.</li>
       <li><b>A history file.</b> <code>.stranger/history.jsonl</code> keeps every verdict with its Kane run links.</li>
       <li><b>Proof anyone can open.</b> Each Kane run has a public page with every step and a replay.</li>
     </ul>
-    <ul role="tabpanel" id="tab-setup" aria-labelledby="t-setup" hidden>
+    <ul class="panel" role="tabpanel" id="tab-setup" aria-labelledby="t-setup" hidden>
       <li><b>Kane CLI.</b> <code>npm install -g @testmuai/kane-cli</code>, then <code>kane-cli login</code>.</li>
       <li><b>Two test accounts you own</b> on your app, in <code>.env</code>. Test accounts only: Kane types these passwords into your app, and Stranger keeps its run folders out of git.</li>
       <li><b>A small config.</b> Your URL, what to plant, where to look. <code>npx github:Sanchay117/stranger init</code> writes one, or the box at the top does.</li>
@@ -151,9 +304,15 @@ Done means: stranger run prints CLEAN.</code></pre>
 </main>
 
 <footer class="foot">
-  <p>Built for the Kane CLI hackathon by TestMu AI. Every browser run is <a href="https://www.testmuai.com/kane-cli/">Kane CLI</a>. Duebook's demo data lives in Supabase and is fake.</p>
-  <p>The 170 of 1,645 figure is from <a href="https://nvd.nist.gov/vuln/detail/CVE-2025-48757">CVE-2025-48757</a> (Matt Palmer, May 2025). <a href="https://escape.tech/blog/methodology-how-we-discovered-vulnerabilities-apps-built-with-vibe-coding/">Escape.tech</a> found 400+ exposed secrets across 5,600 vibe-coded apps.</p>
-  <p><a href="https://github.com/Sanchay117/stranger">Code on GitHub</a></p>
+  <div class="foot-top">
+    <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>Stranger</a>
+    <p class="foot-line">You only ever test your app as yourself. <em>Stranger tests it as someone else.</em></p>
+  </div>
+  <div class="foot-notes">
+    <p>Built for the Kane CLI hackathon by TestMu AI. Every browser run is <a href="https://www.testmuai.com/kane-cli/">Kane CLI</a>. Duebook's demo data lives in Supabase and is fake.</p>
+    <p>The 170 of 1,645 figure is from <a href="https://nvd.nist.gov/vuln/detail/CVE-2025-48757">CVE-2025-48757</a> (Matt Palmer, May 2025). <a href="https://escape.tech/blog/methodology-how-we-discovered-vulnerabilities-apps-built-with-vibe-coding/">Escape.tech</a> found 400+ exposed secrets across 5,600 vibe-coded apps.</p>
+    <p><a href="https://github.com/Sanchay117/stranger">Code on GitHub</a> · <a href="/bench/">The bench</a> · <a href="/duebook/">Duebook</a></p>
+  </div>
 </footer>
 
 <script type="module" src="/site/main.js"></script>

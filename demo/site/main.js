@@ -1,6 +1,7 @@
-// The Stranger landing page: the living blob, the composer, the replay of a real Kane run, and the tabs.
+// The Stranger landing page: the sky and its pictures (sky.js), the composer, the replay of a real Kane run, and the tabs.
 import replay from './replay-afb57e.json'
 import { initTheme } from './theme.js'
+import { art, sky, tear } from './sky.js'
 
 initTheme()
 
@@ -12,134 +13,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
-// ---------- The blob: one WebGL quad, a softly wobbling disc with fake 3D lighting ----------
-;(function blob(host) {
-  const canvas = document.createElement('canvas')
-  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: true })
-  if (!gl) {
-    host.classList.add('fallback')
-    return
-  }
-  host.appendChild(canvas)
-
-  const vert = 'attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }'
-  const frag = `
-    precision highp float;
-    uniform vec2 uRes; uniform float uTime; uniform vec2 uMouse; uniform float uDim;
-    uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec3 c4;
-    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-    float noise(vec2 p) {
-      vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
-      return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
-    }
-    float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
-    void main() {
-      vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / min(uRes.x, uRes.y);
-      uv -= uMouse * 0.05;
-      uv.x *= 0.82; // a little wider than tall, so more of the composer has colour behind it
-      float t = uTime * 0.12;
-      float d = length(uv);
-      float ang = atan(uv.y, uv.x);
-      float r = 0.33 + 0.055 * sin(2.0 * ang + t * 2.2) + 0.04 * sin(3.0 * ang - t * 1.6 + 1.3) + 0.025 * sin(5.0 * ang + t * 3.1 + 2.0);
-      float inside = 1.0 - smoothstep(r - 0.004, r + 0.002, d);
-      if (inside <= 0.0) { gl_FragColor = vec4(0.0); return; }
-      float h = clamp(d / r, 0.0, 1.0);
-      vec3 n = normalize(vec3(uv / r, sqrt(max(0.0, 1.0 - h * h)) + 0.15));
-      vec2 q = uv * 2.4 + vec2(fbm(uv * 2.0 + t), fbm(uv * 2.0 - t + 3.1));
-      float f = fbm(q + t * 0.6);
-      vec3 col = mix(c1, c2, smoothstep(0.3, 0.68, f));
-      col = mix(col, c3, smoothstep(0.45, 0.8, fbm(q * 1.3 - t)) * 0.95);
-      col = mix(col, c4, smoothstep(0.62, 0.9, 1.0 - f) * 0.55);
-      vec3 L = normalize(vec3(-0.45, 0.6, 0.7));
-      float diff = 0.8 + 0.3 * dot(n, L);
-      float spec = pow(max(0.0, dot(reflect(-L, n), vec3(0.0, 0.0, 1.0))), 22.0) * 0.3;
-      col = col * diff + spec;
-      col = mix(col, vec3(1.0), smoothstep(0.75, 1.0, h) * 0.18);
-      col *= uDim;
-      gl_FragColor = vec4(col * inside, inside);
-    }`
-
-  const shader = (type, src) => {
-    const s = gl.createShader(type)
-    gl.shaderSource(s, src)
-    gl.compileShader(s)
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s))
-    return s
-  }
-  let prog
-  try {
-    prog = gl.createProgram()
-    gl.attachShader(prog, shader(gl.VERTEX_SHADER, vert))
-    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, frag))
-    gl.linkProgram(prog)
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog))
-  } catch (err) {
-    console.warn(err)
-    canvas.remove()
-    host.classList.add('fallback')
-    return
-  }
-  gl.useProgram(prog)
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
-  const loc = gl.getAttribLocation(prog, 'p')
-  gl.enableVertexAttribArray(loc)
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
-
-  const u = (name) => gl.getUniformLocation(prog, name)
-  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
-  // Same family as the CSS: canary, amber, coral, and a soft rose for depth.
-  ;[['c1', '#ffcf33'], ['c2', '#ffa21f'], ['c3', '#ff5e57'], ['c4', '#ff8fb3']].forEach(([k, v]) =>
-    gl.uniform3fv(u(k), hex(v)),
-  )
-
-  const mouse = [0, 0]
-  const target = [0, 0]
-  addEventListener(
-    'pointermove',
-    (e) => {
-      target[0] = e.clientX / innerWidth - 0.5
-      target[1] = 0.5 - e.clientY / innerHeight
-    },
-    { passive: true },
-  )
-
-  function size() {
-    const dpr = Math.min(devicePixelRatio || 1, 2)
-    const w = Math.round(canvas.clientWidth * dpr)
-    const h = Math.round(canvas.clientHeight * dpr)
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w
-      canvas.height = h
-      gl.viewport(0, 0, w, h)
-    }
-  }
-
-  let visible = true
-  const start = performance.now()
-  new IntersectionObserver(([e]) => {
-    visible = e.isIntersecting
-  }).observe(host)
-
-  function frame(now) {
-    if (visible && !document.hidden) {
-      size()
-      mouse[0] += (target[0] - mouse[0]) * 0.05
-      mouse[1] += (target[1] - mouse[1]) * 0.05
-      gl.uniform2f(u('uRes'), canvas.width, canvas.height)
-      gl.uniform1f(u('uTime'), still ? 8 : (now - start) / 1000)
-      gl.uniform2f(u('uMouse'), mouse[0], mouse[1])
-      // A little softer at night, so it glows instead of glaring.
-      gl.uniform1f(u('uDim'), document.documentElement.dataset.theme === 'dark' ? 0.86 : 1)
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
-    }
-    if (!still) requestAnimationFrame(frame)
-  }
-  requestAnimationFrame(frame)
-  // With reduced motion it draws once, so draw again when the theme changes.
-  if (still) new MutationObserver(() => requestAnimationFrame(frame)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-})(document.getElementById('blob'))
+// ---------- The pictures: the sky, the tear in it, and the halftone skies behind the cards ----------
+tear(document.getElementById('tear'))
+sky(document.getElementById('sky'), document.getElementById('sky-frame'), document.getElementById('hero-copy'), document.getElementById('tear'))
+art([...document.querySelectorAll('canvas.art')])
 
 // ---------- What to look for ----------
 // The first chip is the live demo. The others write a config for your own app.
@@ -172,7 +49,7 @@ function drawChips() {
   chipsEl.innerHTML = list
     .map(
       (s, n) =>
-        `<button class="chip glass" type="button" style="--i:${n}" data-n="${s.live ? -1 : SCENARIOS.indexOf(s)}" aria-pressed="${s === chosen}">${esc(s.label)}${s.live ? '<span class="live">live</span>' : ''}</button>`,
+        `<button class="chip" type="button" style="--i:${n}" data-n="${s.live ? -1 : SCENARIOS.indexOf(s)}" aria-pressed="${s === chosen}">${esc(s.label)}${s.live ? '<span class="live">live</span>' : ''}</button>`,
     )
     .join('')
 }
@@ -392,7 +269,7 @@ consoleEl.addEventListener('click', async (e) => {
 })
 
 // ---------- Proof links ----------
-document.getElementById('kane-run').href = replay.strangerRun.testUrl
+document.querySelectorAll('.kane-run').forEach((a) => (a.href = replay.strangerRun.testUrl))
 
 // ---------- Tabs ----------
 const tabs = [...document.querySelectorAll('[role="tab"]')]
