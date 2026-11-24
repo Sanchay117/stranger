@@ -15,7 +15,10 @@
         "at": "2026-11-17T13:58:28.071Z",
         "kane": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MWXC72Z55BXNDY9AAAJQRN/dashboard/share/US_S70OVX9C4QCE6EJDN7WY3T69U0HIZ8AQYBGE7K2YQSDCTC656GQS77RX3UNRC63G?type=summary&agentView=true&fqdn=summary-page"
       },
-      "state": "open"
+      "state": "fixed",
+      "fixed": {
+        "at": "2026-11-24T18:03:35.482Z"
+      }
     }
   ],
   "kane": [
