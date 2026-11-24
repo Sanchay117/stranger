@@ -20,7 +20,7 @@ Built for the Kane CLI Online Hackathon (TestMu AI).
 | --- | --- |
 | **Ships** | [Open the live leak as a stranger](https://stranger-2yf3.vercel.app/duebook/?as=stranger), no sign-up. Or run `npx --yes github:Sanchay117/stranger demo` for the whole story in your terminal: no login, no network calls, no credits. |
 | **Verified** | [The bench](https://stranger-2yf3.vercel.app/bench/): 9 of 9 planted bugs caught in real Kane CLI runs, and the clean control stayed clean. [Tried on a real app we didn't write](#tried-on-real-apps-we-didnt-write). In a clone, `npm run verify` recomputes every piece of evidence: 18 saved Kane run pages, no secrets in any of them. |
-| **Closed loop** | [A coding agent fixed a leak it was never told about](#proof-the-loop-really-closed): LEAK [`f5b2cc`](https://stranger-2yf3.vercel.app/runs/f5b2cc/), its migration, then CLEAN [`c789a7`](https://stranger-2yf3.vercel.app/runs/c789a7/). The [same loop runs in CI](#fix-loop-in-ci-no-human-in-it) with no human in it. |
+| **Closed loop** | [A coding agent fixed a leak it was never told about](#proof-the-loop-really-closed): LEAK [`f5b2cc`](https://stranger-2yf3.vercel.app/runs/f5b2cc/), its migration, then CLEAN [`c789a7`](https://stranger-2yf3.vercel.app/runs/c789a7/). The [same loop ran in CI](#fix-loop-in-ci-no-human-in-it) with no human in it, on [pull request 11](https://github.com/Sanchay117/stranger/pull/11): LEAK `92a8e9`, the agent's migration, CLEAN `66224d`. |
 | **Craft** | A [fix brief](https://github.com/Sanchay117/stranger/blob/main/bench/cases/rls_off/.stranger/FIX.md) that names the exact policy to change. [Leak guards](#leak-guards-kane-finds-a-leak-once-the-guard-keeps-it-found) that replayed with zero healing after a full redesign. |
 
 ## Why
@@ -199,6 +199,8 @@ It needs repository secrets `LT_USERNAME` and `LT_ACCESS_KEY` (your TestMu AI / 
 5. the workflow (not the agent) commits the migration to the branch, marks that commit, and comments before and after on the pull request: both Kane runs, the SQL, what the agent said, and the guards.
 
 The live demo database is never touched, and a branch gets at most two fix-loop commits. One loop costs about 100 Kane credits (two Stranger runs) plus the agent's API usage, capped at 5 dollars (`AGENT_BUDGET_USD`). The logic lives in `scripts/fix-loop.mjs`, tested offline with a stand-in Kane and a stand-in agent.
+
+**Live run, 24 Nov:** [pull request 11](https://github.com/Sanchay117/stranger/pull/11) adds an invoice count to Duebook and leaves the leak in. Labelled `stranger-fix`, [the workflow](https://github.com/Sanchay117/stranger/actions/runs/45453781393) ran Kane on the branch: LEAK `92a8e9` (the stranger saw the owner's canary, and the API returned it with no login). Claude Code, headless, read the fix brief and wrote `0002_invoices_owner_read.sql`; the Stop hook's re-run with a fresh canary said CLEAN `66224d`, the leak guard held, and the workflow committed the migration ([`27020a9`](https://github.com/Sanchay117/stranger/commit/27020a9)) and posted the before and after on the pull request. About 119 Kane credits. Nobody touched it after adding the label. The pull request stays open and unmerged, because `main` keeps the leak on purpose.
 
 Setup, once:
 
