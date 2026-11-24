@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 // Reads a Supabase migrations folder in order and works out which row level security policies
@@ -63,16 +64,14 @@ export function userTables(dir) {
 }
 
 // The policies as they are in the live database right now (read only: pg_policies and pg_class).
-// Needs the "pg" package where Stranger runs; without it, or on any error, this says why and moves on.
+// Uses the "pg" package (the app's own, else Stranger's), else the psql command line; without either,
+// or on any error, this says why and moves on.
 export async function livePolicies(cfg, tables) {
-  let pg
-  try {
-    const require = createRequire(join(cfg.root, 'package.json'))
-    pg = (await import(pathToFileURL(require.resolve('pg')).href)).default
-  } catch {
-    return { error: 'install "pg" in this project to read the live policies' }
-  }
-  const client = new pg.Client({ connectionString: cfg.databaseUrl, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10_000 })
+  const pg = await loadPg(cfg)
+  if (!pg) return psqlPolicies(cfg, tables)
+  // A local database usually has no SSL; a hosted one (Supabase) needs it.
+  const local = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(cfg.databaseUrl) || /sslmode=disable/.test(cfg.databaseUrl)
+  const client = new pg.Client({ connectionString: cfg.databaseUrl, ssl: local ? false : { rejectUnauthorized: false }, connectionTimeoutMillis: 10_000 })
   try {
     await client.connect()
     const out = {}
@@ -86,6 +85,52 @@ export async function livePolicies(cfg, tables) {
     return { error: `could not read the live policies: ${err.message}` }
   } finally {
     await client.end().catch(() => {})
+  }
+}
+
+async function loadPg(cfg) {
+  for (const from of [join(cfg.root, 'package.json'), import.meta.url]) {
+    try {
+      const require = createRequire(from)
+      return (await import(pathToFileURL(require.resolve('pg')).href)).default
+    } catch {}
+  }
+  return null
+}
+
+// The same two queries through psql. The login goes in PG* variables, never on the command line, and the
+// table name is a psql variable (:'t'), quoted by psql.
+const PSQL = `select json_build_object(
+  'rls', (select c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = :'t'),
+  'policies', coalesce((select json_agg(json_build_object('name', policyname, 'command', lower(cmd), 'roles', array_to_string(roles, ', '), 'using', qual) order by policyname)
+    from pg_policies where schemaname = 'public' and tablename = :'t'), '[]'::json));`
+function psqlPolicies(cfg, tables) {
+  let url
+  try {
+    url = new URL(cfg.databaseUrl)
+  } catch {
+    return { error: 'the database URL is not a postgres:// address' }
+  }
+  const env = {
+    ...process.env,
+    PGHOST: url.hostname.replace(/^\[|\]$/g, ''),
+    PGPORT: url.port || '5432',
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+    PGDATABASE: decodeURIComponent(url.pathname.slice(1)) || 'postgres',
+    PGCONNECT_TIMEOUT: '10',
+    ...(url.searchParams.get('sslmode') ? { PGSSLMODE: url.searchParams.get('sslmode') } : {}),
+  }
+  const out = {}
+  try {
+    for (const table of tables) {
+      const text = execFileSync('psql', ['-X', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `t=${table}`], { env, input: PSQL, encoding: 'utf8', timeout: 20_000, stdio: ['pipe', 'pipe', 'pipe'] })
+      const live = JSON.parse(text.trim())
+      out[table] = { rls: live.rls, policies: live.policies.map((p) => ({ ...p, open: isOpen(p.using) })) }
+    }
+    return out
+  } catch (err) {
+    return { error: err.code === 'ENOENT' ? 'install "pg" in this project (or psql) to read the live policies' : `could not read the live policies: ${String(err.stderr || err.message).trim().split('\n')[0]}` }
   }
 }
 

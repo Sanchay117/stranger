@@ -20,28 +20,20 @@ const OPENERS = {
 const HINTS = {
   // "live" is the table's row level security and policies as they are in the database right now (with a
   // database URL); "via" is how the leak reached the stranger (see leakPath).
-  supabase: (cfg, table, { live, via = 'rest' } = {}) => {
+  // "opener: false" leaves out the first lines, and "rlsOff" the migrations' own row level security
+  // notes, when the brief already said row level security is off (see driftHint).
+  supabase: (cfg, table, { live, via = 'rest', opener = true, rlsOff = false } = {}) => {
     const known = table ?? '<table>'
     const found = table && cfg.migrations ? readPolicies(join(cfg.root, cfg.migrations), table) : null
     const col = found?.ownerColumn ?? 'user_id'
     const open = found?.select.filter((p) => p.open) ?? []
     const reads = (p) => p.command === 'select' || p.command === 'all'
     const liveOpen = (live?.policies ?? []).filter((p) => p.open && reads(p))
-    const liveOff = !!table && live?.rls === false
-    const lines = [...OPENERS[via](known), '']
+    const lines = opener ? [...OPENERS[via](known), ''] : []
 
-    if (liveOff) {
-      lines.push(
-        `Row Level Security is **off** for \`${table}\` in the live database right now, so its policies do nothing and every account can read every row, and so can anyone with the public key.${found?.rls === true ? ' Your migrations turn it on, so it was turned off by hand, in the dashboard or the SQL editor.' : ''} Turn it back on:`,
-        '',
-        '```sql',
-        `alter table public.${table} enable row level security;`,
-        '```',
-        '',
-      )
-    } else if (found?.files && found.rls === false) {
+    if (found?.files && found.rls === false && !rlsOff) {
       lines.push(`Your migrations turn Row Level Security **off** for \`${table}\`, so every account can read every row. Turn it on (\`alter table public.${table} enable row level security;\`) and add owner-only policies.`, '')
-    } else if (found?.files && found.rls === null) {
+    } else if (found?.files && found.rls === null && !rlsOff) {
       lines.push(`Your migrations in \`${cfg.migrations}/\` never turn on Row Level Security for \`${table}\`. Unless it was turned on in the dashboard, every account can read every row.`, '')
     }
     if (found?.select.length) {
@@ -54,13 +46,7 @@ const HINTS = {
     const migrationNote = cfg.migrations
       ? `Write it as a new migration in \`${cfg.migrations}/\` (never edit an applied one), apply it, and check UPDATE and DELETE policies on the same table too.`
       : 'Apply it as a new migration, and check UPDATE and DELETE policies on the same table too.'
-    // Row level security simply off, with owner-only read policies already on the table: turning it back
-    // on is the whole fix, and a new policy would only add noise.
-    if (liveOff && !open.length && !liveOpen.length && (found?.select.length || live.policies.some(reads))) {
-      lines.push(`Once it is back on, the read policies already on \`${table}\` limit each account to its own rows, so no new policy is needed. ${migrationNote}`)
-      return lines
-    }
-    if (found?.files && !open.length && found.rls !== false && !liveOff) {
+    if (found?.files && !open.length && found.rls !== false && !rlsOff) {
       lines.push(
         found.select.length
           ? 'None of these looks open at a glance, so check what else can return these rows: a wider condition in one of them, a view, a `security definer` function, or a policy added in the dashboard (compare with `select * from pg_policies where tablename = \'' + table + '\'`).'
@@ -397,16 +383,30 @@ function fix(cfg, r) {
   const views = viewsIn(cfg.migrations ? join(cfg.root, cfg.migrations) : null)
   const perTable = (t) => {
     const lines = []
-    // A view has no policies of its own: its fix is security_invoker (in "extra" below).
-    if ((readLeak || persona) && !views.has(t)) lines.push(...hint(cfg, t, { live: t ? r.live?.[t] : undefined, via }), '')
+    const live = t ? r.live?.[t] : undefined
+    const forgedHere = forged.some((f) => !t || f.table === t)
+    const drift = cfg.database === 'supabase' && (readLeak || changedRow || forgedHere) && !views.has(t) ? driftOf(cfg, t, live, failing) : null
+    if (drift) {
+      // One cause behind the reads, changes and forged rows: say it once, with its fix, instead of
+      // suggesting policies the table already has.
+      lines.push(...OPENERS[via](t), '', ...driftHint(cfg, t, drift, { live, anon: failing.some((p) => p.anonymous?.length), changed: changedRow, forged: forgedHere }), '')
+      const policies = readPolicies(cfg.migrations ? join(cfg.root, cfg.migrations) : null, t)
+      const liveOpen = (live?.policies ?? []).some((p) => p.open)
+      if (drift === 'off' && (liveOpen || policies.select.some((p) => p.open) || !(policies.select.length || live?.policies?.length))) {
+        lines.push('The read policies need fixing too:', '', ...hint(cfg, t, { live, via, opener: false, rlsOff: true }), '')
+      }
+    } else {
+      // A view has no policies of its own: its fix is security_invoker (in "extra" below).
+      if ((readLeak || persona) && !views.has(t)) lines.push(...hint(cfg, t, { live, via }), '')
+      if (changedRow) lines.push(...writeHint(cfg, t), '')
+      if (forgedHere) lines.push(...insertHint(cfg, t ?? forged[0].table, forged[0].column), '')
+    }
     if (aggregate) {
       lines.push(
         "Something the stranger reads adds up or counts rows without checking who is asking: usually a view or a database function. In Postgres a view runs with its creator's rights unless it is made with `with (security_invoker = true)`, and a `security definer` function skips row level security too. Make them respect the caller, or filter by `auth.uid()` inside.",
         '',
       )
     }
-    if (changedRow) lines.push(...writeHint(cfg, t), '')
-    if (forged.some((f) => !t || f.table === t)) lines.push(...insertHint(cfg, t ?? forged[0].table, forged[0].column), '')
     if (kinds.has('OVERLOCKED')) {
       lines.push(
         'Someone who should see these rows, like a teammate, is now locked out. `auth.uid() = user_id` is right for private rows, but shared rows need a membership check too, for example:',
@@ -417,7 +417,6 @@ function fix(cfg, r) {
         '',
       )
     }
-    const live = t && r.live?.[t]
     if (live) {
       const migrated = new Set(readPolicies(cfg.migrations ? join(cfg.root, cfg.migrations) : null, t).all.map((p) => p.name))
       lines.push(
@@ -466,6 +465,49 @@ function fix(cfg, r) {
   ]
     .filter((line) => line !== null)
     .join('\n')
+}
+
+// The database is not running the table's policies as the migrations write them. 'off': row level
+// security is off in the live database. 'suspected' (no live look): the migrations turn it on with only
+// owner-only policies, yet a read of the table itself (not a view or a function) gave the owner's rows away.
+function driftOf(cfg, t, live, failing) {
+  if (!t) return null
+  if (live?.rls === false) return 'off'
+  if (live) return null
+  const found = readPolicies(cfg.migrations ? join(cfg.root, cfg.migrations) : null, t)
+  const ownerOnly = found.rls === true && found.select.length > 0 && found.all.every((p) => !p.open && !p.checkOpen)
+  const tableRead = failing.flatMap(hits).some((h) => h.url && new RegExp(`/rest/v1/${t}(?:[?/]|$)`).test(h.url))
+  return ownerOnly && tableRead ? 'suspected' : null
+}
+
+function driftHint(cfg, t, kind, { live, anon, changed, forged }) {
+  const found = readPolicies(cfg.migrations ? join(cfg.root, cfg.migrations) : null, t)
+  const did = [changed && 'change rows they do not own', forged && "add rows in the owner's name"].filter(Boolean)
+  const also = did.length ? `, and the stranger could ${did.join(' and ')}` : ''
+  const enable = ['```sql', `alter table public.${t} enable row level security;`, '```', '']
+  const migration = cfg.migrations ? `Write it as a new migration in \`${cfg.migrations}/\` (never edit an applied one) so every copy of the database gets it, and apply it.` : 'Write it as a new migration so every copy of the database gets it, and apply it.'
+  if (kind === 'off') {
+    const ownerOnly = !(live?.policies ?? []).some((p) => p.open) && !found.all.some((p) => p.open) && (found.select.length || live?.policies?.length)
+    return [
+      `Row Level Security is **off** for \`${t}\` in the live database right now, so its policies do nothing: every account can read every row${anon ? ', and so can anyone with the public key and no login' : ''}${also}.${found.rls === true ? ' Your migrations turn it on, so it was turned off by hand, in the dashboard or the SQL editor.' : found.rls === false ? ' Your migrations turn it off.' : ' Your migrations never turn it on.'} Turn it back on:`,
+      '',
+      ...enable,
+      `${ownerOnly ? `Once it is on, the policies already on \`${t}\` limit each account to its own rows, so no new policy is needed. ` : ''}${migration} This one change fixes everything above together. Then run Stranger again: the policies themselves only count once Row Level Security is on.`,
+    ]
+  }
+  return [
+    `Your migrations turn Row Level Security on for \`${t}\`, and its policies only let each account at its own rows. Yet a read of the table itself gave the owner's row to the stranger${anon ? ' and to a request with no login' : ''}${also}. So the live database is not running what the migrations say. Most likely Row Level Security was turned off for the table by hand (in the dashboard or the SQL editor), or a policy was added there. Check both:`,
+    '',
+    '```sql',
+    `select relrowsecurity from pg_class where oid = 'public.${t}'::regclass; -- false: it is off`,
+    `select policyname, cmd, roles, qual from pg_policies where schemaname = 'public' and tablename = '${t}';`,
+    '```',
+    '',
+    'If it is off, turn it back on, and the policies in your migrations do the rest:',
+    '',
+    ...enable,
+    `If a policy you do not recognise shows up, drop it. ${migration}${cfg.databaseUrl ? '' : ' With a `databaseUrl` in stranger.config.json, Stranger reads the live state itself and says which one it is.'}`,
+  ]
 }
 
 function writeHint(cfg, t) {

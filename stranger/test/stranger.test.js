@@ -786,6 +786,12 @@ test('server code: filtered by account in the app, but the table is open, is a L
   assert.match(fix, /signs in with Supabase from the browser/)
   assert.match(fix, /\(table `invoices`\)/)
   assert.doesNotMatch(fix, /reads its data straight from Supabase/)
+  // The migrations are owner-only, yet the table itself leaked: the brief names the likely cause (row level
+  // security turned off by hand) instead of suggesting policies the table already has.
+  assert.match(fix, /the live database is not running what the migrations say/)
+  assert.match(fix, /and the stranger could change rows they do not own|Check both:/)
+  assert.match(fix, /alter table public\.invoices enable row level security;/)
+  assert.doesNotMatch(fix, /create policy|drop policy/)
   // The canary row was found, so the row checks ran too, as they do for an app that reads Supabase itself.
   assert.equal(last.probes[0].api.row.table, 'invoices')
   assert.equal(last.probes[0].api.tamper.ran, true)
