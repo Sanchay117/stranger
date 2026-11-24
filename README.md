@@ -23,6 +23,13 @@ Built for the Kane CLI Online Hackathon (TestMu AI).
 | **Closed loop** | [A coding agent fixed a leak it was never told about](#proof-the-loop-really-closed): LEAK [`f5b2cc`](https://stranger-2yf3.vercel.app/runs/f5b2cc/), its migration, then CLEAN [`c789a7`](https://stranger-2yf3.vercel.app/runs/c789a7/). The [same loop ran in CI](#fix-loop-in-ci-no-human-in-it) with no human in it, on [pull request 11](https://github.com/Sanchay117/stranger/pull/11): LEAK `92a8e9`, the agent's migration, CLEAN `66224d`. And on PennyFlow, an app we didn't write: LEAK [`56eb00`](https://stranger-2yf3.vercel.app/runs/56eb00/), a fresh agent's migration, CLEAN [`10dfea`](https://stranger-2yf3.vercel.app/runs/10dfea/). |
 | **Craft** | A [fix brief](https://github.com/Sanchay117/stranger/blob/main/bench/cases/rls_off/.stranger/FIX.md) that names the exact policy to change. [Leak guards](#leak-guards-kane-finds-a-leak-once-the-guard-keeps-it-found) that replayed with zero healing after a full redesign. |
 
+**Since the demo video** (24 Nov, all real Kane runs):
+
+- **The fix loop ran in GitHub Actions with no human in it.** On [pull request 11](https://github.com/Sanchay117/stranger/pull/11), Kane said LEAK, Claude Code wrote the migration, Kane said CLEAN, and the workflow committed the fix.
+- **A closed loop on an app we didn't write.** PennyFlow: [CLEAN](https://stranger-2yf3.vercel.app/runs/3555e0/) as shipped, [LEAK](https://stranger-2yf3.vercel.app/runs/56eb00/) with row level security off, a fresh agent's fix, [CLEAN](https://stranger-2yf3.vercel.app/runs/10dfea/) again.
+- **Kane CLI 0.10.9 caught the live leak again** on the redesigned Duebook: [LEAK e18167](https://stranger-2yf3.vercel.app/runs/e18167/).
+- **Every run is kept.** 21 saved Kane runs at `/runs/<id>/`, checked for secrets by `npm run verify` on every push.
+
 ## Why
 
 AI app builders often ship a database rule that lets every account read every row. The app looks fine, because the person building it only ever logs in as themselves. You need a second account to notice, and nobody tests with one.
