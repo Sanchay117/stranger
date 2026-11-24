@@ -1,15 +1,15 @@
 # Stranger found a data leak
 
-Impact: `invoices`: stranger reads 12 rows from 1 other account (20 rows with no login).
+Impact: `invoices`: stranger reads 5 rows from 1 other account (6 rows with no login).
 
 Owner: **maya@duebook.demo**. Stranger: **stranger@duebook.demo**.
 
-- Canary the owner planted: `stranger-canary-e7689f`
+- Canary the owner planted: `stranger-canary-e18167`
 - How it showed up: on the page
 - **No login needed:** the API returned it to a request with no login (only the public key), so anyone on the internet can read these rows.
 - Response that carried it: https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/invoices (table `invoices`)
-- Kane's failing check: assert: the text "stranger-canary-e7689f" does not appear anywhere on the page
-- Kane run: https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7MWXC72Z55BXNDY9AAAJQRN/dashboard/share/US_S70OVX9C4QCE6EJDN7WY3T69U0HIZ8AQYBGE7K2YQSDCTC656GQS77RX3UNRC63G?type=summary&agentView=true&fqdn=summary-page
+- Kane's failing check: assert: the text "stranger-canary-e18167" does not appear anywhere on the page
+- Kane run: https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M873Z7V6VEXWXV5MRYQQD6CK/dashboard/share/US_HUMRJRNVABD3PRAP6LWUQN06I39D3X2208MHDR4LXH8KQYXQKDY2XIYSO2YXUX1S?type=summary&agentView=true&fqdn=summary-page
 - Full report: .stranger/report.md
 
 ## What to fix
