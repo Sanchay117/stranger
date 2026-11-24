@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runKane, passed, said } from './kane.js'
-import { searchEvidence, restTables, apiRequests, loginHeaders, rpcCalls, storageBuckets, visitedUrls } from './evidence.js'
-import { replayReads, replayRpc, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, subjectOf, numericCheck, tamperCheck, personaCheck, forgeCheck, storageCheck, realtimeCheck } from './api.js'
+import { searchEvidence, restTables, apiRequests, loginHeaders, rpcCalls, storageBuckets, visitedUrls, supabaseProject } from './evidence.js'
+import { replayReads, replayRpc, blastRadius, mergeBlastRadius, supabaseTarget, findCanaryRow, directReads, dbLogin, subjectOf, numericCheck, tamperCheck, personaCheck, forgeCheck, storageCheck, realtimeCheck } from './api.js'
 import { userTables, livePolicies, readPolicies, functionsIn } from './policies.js'
 import { guardCandidates } from './guards.js'
 
@@ -193,7 +193,7 @@ async function checkProbe(cfg, probe, { tag, runDir, prefix, headless, onProgres
   const replay = api.replay
   const evidence = [...searchEvidence(stranger.sessionDir, canary).hits, ...replay.filter((r) => r.hit && r.as === 'stranger')]
   const anonymous = replay.filter((r) => r.hit && r.as === 'anonymous')
-  const tables = [...new Set([...restTables(owner.sessionDir), ...restTables(stranger.sessionDir)])]
+  const tables = [...new Set([...restTables(owner.sessionDir), ...restTables(stranger.sessionDir), ...(api.direct ? [api.direct] : [])])]
   onProgress({ phase: 'stranger-done', evidence, replay, api })
 
   const result = { ...base, ownerRun: owner, strangerRun: stranger, evidence, anonymous, replay, tables, api, links }
@@ -205,12 +205,15 @@ function readVerdict(cfg, probe, { canary, control, strangerRun: stranger, evide
   const alsoAnon = anonymous.length ? ' With no login at all, the API returns it too.' : ''
   const replayed = evidence.some((h) => h.as === 'stranger')
   const onlyOwnerPage = replayed && evidence.every((h) => h.as !== 'stranger' || h.page === 'owner')
+  const onlyDirect = replayed && evidence.every((h) => h.as !== 'stranger' || h.page === 'direct')
 
   if (passed(strangerResult)) {
     if (evidence.length) {
-      const why = onlyOwnerPage
-        ? `The stranger's pages looked clean, but a read from the owner's page, sent with the stranger's login, returns the owner's canary${from(evidence)}.`
-        : `The page hid it, but the server sends the owner's canary to the stranger${from(evidence)}.`
+      const why = onlyDirect
+        ? `The app's pages looked clean, but the \`${evidence.find((h) => h.table)?.table}\` table, read straight from Supabase with the stranger's login, returns the owner's canary. The browser has the project's address and public key from signing in, so anyone can read it that way, whatever the app's own server code filters.`
+        : onlyOwnerPage
+          ? `The stranger's pages looked clean, but a read from the owner's page, sent with the stranger's login, returns the owner's canary${from(evidence)}.`
+          : `The page hid it, but the server sends the owner's canary to the stranger${from(evidence)}.`
       return { verdict: 'LEAK', seen: 'network', why: why + alsoAnon }
     }
     if (anonymous.length) {
@@ -326,7 +329,6 @@ async function apiChecks(cfg, owner, stranger, canary) {
   }
   const replay = await replayReads(list, canary, strangerLogin, observe)
   const out = { reads: list.length, replay, numeric: null, tamper: null, personas: [], notes }
-  if (blast) out.blast = blast.entries()
 
   // Database functions the pages called: only the safe ones (no arguments, cannot write) are sent again.
   const calls = new Map()
@@ -334,31 +336,56 @@ async function apiChecks(cfg, owner, stranger, canary) {
     for (const c of rpcCalls(run.sessionDir)) calls.set(c.url, calls.has(c.url) ? { ...calls.get(c.url), page: 'both' } : { ...c, page })
   }
   if (cfg.rpc !== false && calls.size) out.replay.push(...(await replayRpc([...calls.values()], canary, strangerLogin, functionsIn(dir))))
+
+  // The Supabase project: from the pages' data reads or database function calls, else from any call that
+  // carried the public key. An app that loads everything through its own server code still signs in from
+  // the browser, so its sign-in names the project just as well.
+  const target = supabaseTarget(list) ?? supabaseTarget([...calls.values()]) ?? supabaseProject(owner.sessionDir) ?? supabaseProject(stranger.sessionDir)
+  // Logins the Supabase API takes. The pages' own usually are; an app on cookies (or its own server
+  // tokens) gets a password sign-in with the config's accounts instead.
+  let ownerDb = ownerLogin.authorization ? ownerLogin : null
+  let strangerDb = strangerLogin.authorization ? strangerLogin : null
+  if (target && (!ownerDb || !strangerDb || !list.some((r) => r.url.includes('/rest/v1/')))) {
+    ownerDb = await dbLogin(target, ownerLogin, cfg.owner)
+    strangerDb = await dbLogin(target, strangerLogin, cfg.stranger)
+  }
+
+  // The owner's canary row, read back as the owner: first through the pages' own data reads, then, if none
+  // of them holds it, straight from the user tables no page read. The table found that way is read again
+  // as the stranger and with no login: the app's server code may filter by account while the table is open.
+  let found = target && ownerDb ? await findCanaryRow(target, list, ownerDb, canary) : null
+  if (!found && target && ownerDb && dir && cfg.direct) {
+    const direct = directReads(target, userTables(dir), list)
+    found = await findCanaryRow(target, direct, ownerDb, canary)
+    const read = found && direct.find((d) => d.table === found.table)
+    if (read) {
+      out.direct = found.table
+      out.replay.push(...(await replayReads([read], canary, strangerDb ?? {}, observe)))
+    }
+  }
+  if (blast) out.blast = blast.entries()
   // The reads that leaked, kept as guards (account ids swapped for {owner} and {stranger}).
-  out.guards = guardCandidates(out.replay, { owner: subjectOf(ownerLogin), stranger: subjectOf(strangerLogin) })
+  out.guards = guardCandidates(out.replay, { owner: subjectOf(ownerDb ?? ownerLogin), stranger: subjectOf(strangerDb ?? strangerLogin) })
 
   const wantsRow = cfg.numeric || cfg.tamper || cfg.forge || cfg.realtime
   const buckets = cfg.storage ? [...new Set([...(cfg.storageBuckets ?? []), ...storageBuckets(owner.sessionDir), ...storageBuckets(stranger.sessionDir)])] : []
   if (!wantsRow && !buckets.length && !cfg.personas.length) return out
-  // A page may call only database functions; their address names the Supabase project just as well.
-  const target = supabaseTarget(list) ?? supabaseTarget([...calls.values()])
   if (!target) {
     out.notes.push('Tamper, forge, numeric, storage, realtime and persona checks need a Supabase API in the logs; none was found.')
     return out
   }
   if (cfg.personas.length) out.personas = await personaCheck(target, cfg.personas, list, canary)
-  if (buckets.length && ownerLogin.authorization) out.storage = await storageCheck(target, buckets, ownerLogin, strangerLogin, canary)
+  if (buckets.length && ownerDb) out.storage = await storageCheck(target, buckets, ownerDb, strangerDb ?? {}, canary)
+  if (found) out.row = { table: found.table, field: found.field }
   if (!wantsRow) return out
-  const found = ownerLogin.authorization ? await findCanaryRow(target, list, ownerLogin, canary) : null
   if (!found) {
     out.notes.push("Tamper, forge, numeric and realtime checks skipped: the owner's canary row could not be read back through the API.")
     return out
   }
-  out.row = { table: found.table, field: found.field }
-  if (!strangerLogin.authorization) return out
-  if (cfg.numeric) out.numeric = await numericCheck(target, found, list, ownerLogin, strangerLogin, canary)
-  if (cfg.tamper) out.tamper = await tamperCheck(target, found, ownerLogin, strangerLogin, canary)
-  if (cfg.forge) out.forge = await forgeCheck(target, found, ownerLogin, strangerLogin, canary, readPolicies(dir, found.table).ownerColumn)
-  if (cfg.realtime) out.realtime = await realtimeCheck(target, found, ownerLogin, strangerLogin, canary, cfg.realtimeTopics)
+  if (!strangerDb) return out
+  if (cfg.numeric) out.numeric = await numericCheck(target, found, list, ownerDb, strangerDb, canary)
+  if (cfg.tamper) out.tamper = await tamperCheck(target, found, ownerDb, strangerDb, canary)
+  if (cfg.forge) out.forge = await forgeCheck(target, found, ownerDb, strangerDb, canary, readPolicies(dir, found.table).ownerColumn)
+  if (cfg.realtime) out.realtime = await realtimeCheck(target, found, ownerDb, strangerDb, canary, cfg.realtimeTopics)
   return out
 }

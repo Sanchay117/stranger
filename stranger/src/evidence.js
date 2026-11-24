@@ -123,6 +123,20 @@ export function loginHeaders(sessionDir) {
   return login
 }
 
+// The Supabase project the page talked to, from any of its own API calls that carried the public key:
+// sign-in counts too. An app can load all its data through its own server code and still sign in from
+// the browser, which hands anyone the project's address and public key.
+export function supabaseProject(sessionDir) {
+  for (const entry of entries(sessionDir)) {
+    const url = entry.request?.url ?? ''
+    const at = url.search(/\/(auth|rest|storage|realtime)\/v1\//)
+    if (at < 0 || !/^https?:/.test(url)) continue
+    const apikey = (entry.request.headers ?? []).find((h) => h?.name?.toLowerCase() === 'apikey')?.value
+    if (apikey) return { base: url.slice(0, at), apikey }
+  }
+  return null
+}
+
 // Every HAR entry in the run's network logs (loose files and inside evidence packs).
 function* entries(sessionDir) {
   if (!sessionDir || !existsSync(sessionDir)) return

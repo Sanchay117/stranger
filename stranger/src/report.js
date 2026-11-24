@@ -6,15 +6,40 @@ import { functionsIn, readPolicies, viewsIn } from './policies.js'
 // Reports get committed, so local paths show as ~/... instead of naming the user's home folder.
 const tidy = (text) => text.split(homedir()).join('~')
 
+// The brief's first lines for a Supabase app, by how the owner's rows reached the stranger.
+const OPENERS = {
+  rest: () => ['This app reads its data straight from Supabase, so the database decides who sees which rows (Row Level Security).'],
+  direct: (t) => [
+    `This app loads its data through its own server code, but it signs in with Supabase from the browser, so every visitor has the project's address and public key. With them anyone can read \`${t}\` straight from Supabase, and Stranger did: the stranger got the owner's row. So the database decides who sees which rows (Row Level Security), whatever the server code filters.`,
+  ],
+  server: () => [
+    "This app loads its data through its own server code: the response that carried the owner's row came from the app's own endpoint, not from Supabase. If that code queries Supabase with the signed-in user's login, the database decides who sees which rows (Row Level Security). If it uses the service role key, Row Level Security is skipped, and the code itself must filter by the signed-in user.",
+  ],
+}
+
 const HINTS = {
-  supabase: (cfg, table) => {
+  // "live" is the table's row level security and policies as they are in the database right now (with a
+  // database URL); "via" is how the leak reached the stranger (see leakPath).
+  supabase: (cfg, table, { live, via = 'rest' } = {}) => {
     const known = table ?? '<table>'
     const found = table && cfg.migrations ? readPolicies(join(cfg.root, cfg.migrations), table) : null
     const col = found?.ownerColumn ?? 'user_id'
     const open = found?.select.filter((p) => p.open) ?? []
-    const lines = ['This app reads its data straight from Supabase, so the database decides who sees which rows (Row Level Security).', '']
+    const reads = (p) => p.command === 'select' || p.command === 'all'
+    const liveOpen = (live?.policies ?? []).filter((p) => p.open && reads(p))
+    const liveOff = !!table && live?.rls === false
+    const lines = [...OPENERS[via](known), '']
 
-    if (found?.files && found.rls === false) {
+    if (liveOff) {
+      lines.push(
+        `Row Level Security is **off** for \`${table}\` in the live database right now, so its policies do nothing and every account can read every row, and so can anyone with the public key.${found?.rls === true ? ' Your migrations turn it on, so it was turned off by hand, in the dashboard or the SQL editor.' : ''} Turn it back on:`,
+        '',
+        '```sql',
+        `alter table public.${table} enable row level security;`,
+        '```',
+        '',
+      )
+    } else if (found?.files && found.rls === false) {
       lines.push(`Your migrations turn Row Level Security **off** for \`${table}\`, so every account can read every row. Turn it on (\`alter table public.${table} enable row level security;\`) and add owner-only policies.`, '')
     } else if (found?.files && found.rls === null) {
       lines.push(`Your migrations in \`${cfg.migrations}/\` never turn on Row Level Security for \`${table}\`. Unless it was turned on in the dashboard, every account can read every row.`, '')
@@ -26,7 +51,16 @@ const HINTS = {
       }
       lines.push('')
     }
-    if (found?.files && !open.length && found.rls !== false) {
+    const migrationNote = cfg.migrations
+      ? `Write it as a new migration in \`${cfg.migrations}/\` (never edit an applied one), apply it, and check UPDATE and DELETE policies on the same table too.`
+      : 'Apply it as a new migration, and check UPDATE and DELETE policies on the same table too.'
+    // Row level security simply off, with owner-only read policies already on the table: turning it back
+    // on is the whole fix, and a new policy would only add noise.
+    if (liveOff && !open.length && !liveOpen.length && (found?.select.length || live.policies.some(reads))) {
+      lines.push(`Once it is back on, the read policies already on \`${table}\` limit each account to its own rows, so no new policy is needed. ${migrationNote}`)
+      return lines
+    }
+    if (found?.files && !open.length && found.rls !== false && !liveOff) {
       lines.push(
         found.select.length
           ? 'None of these looks open at a glance, so check what else can return these rows: a wider condition in one of them, a view, a `security definer` function, or a policy added in the dashboard (compare with `select * from pg_policies where tablename = \'' + table + '\'`).'
@@ -35,19 +69,21 @@ const HINTS = {
       )
     }
 
+    // The open policies to drop: from the migrations and the live database. With neither known, the name
+    // Supabase's dashboard gives an open read policy is the likeliest guess.
+    const drops = [...new Set([...open, ...liveOpen].map((p) => p.name))]
+    if (!drops.length && !found?.files && !live) drops.push('Enable read access for all users')
     lines.push(
-      open.length ? 'Replace the open policy with one that only returns the signed-in user\'s rows:' : 'Each account should only get its own rows back, for example:',
+      drops.length ? 'Replace the open policy with one that only returns the signed-in user\'s rows:' : 'Each account should only get its own rows back, for example:',
       '',
       '```sql',
-      ...(open.length ? open : [{ name: 'Enable read access for all users' }]).map((p) => `drop policy if exists "${p.name}" on public.${known};`),
+      ...drops.map((name) => `drop policy if exists "${name}" on public.${known};`),
       `create policy "Owners can read their own rows" on public.${known}`,
       '  for select to authenticated',
       `  using ((select auth.uid()) = ${col});`,
       '```',
       '',
-      cfg.migrations
-        ? `Write it as a new migration in \`${cfg.migrations}/\` (never edit an applied one), apply it, and check UPDATE and DELETE policies on the same table too.`
-        : 'Apply it as a new migration, and check UPDATE and DELETE policies on the same table too.',
+      migrationNote,
     )
     return lines
   },
@@ -139,11 +175,12 @@ function apiLines(p, multi) {
     lines.push(
       head('Data reads sent again'),
       `Right after Kane's runs, Stranger sent every data read from both pages again (GETs, and database functions that cannot write and take no arguments): with the stranger's login, then with none.`,
+      ...(a.direct ? ['', `None of the pages' data reads held the owner's canary, so Stranger read the user tables straight from Supabase as the owner, found it in \`${a.direct}\`, and read that table again as the stranger and with no login. The browser has the project's address and public key from signing in, so anyone can send these reads.`] : []),
       '',
       ...p.replay.map((r) =>
         r.skipped
           ? `- Not sent again: ${r.method} ${r.url.split('?')[0]} (${r.skipped})`
-          : `- ${r.as === 'stranger' ? "With the stranger's login" : 'With no login'}: ${r.method ?? 'GET'} ${r.url.split('?')[0]} (${r.page === 'owner' ? "owner's page" : r.page === 'both' ? 'both pages' : "stranger's page"}) -> ${r.status ?? r.error}${r.hit ? ", **owner's canary in the response**" : ''}`,
+          : `- ${r.as === 'stranger' ? "With the stranger's login" : 'With no login'}: ${r.method ?? 'GET'} ${r.url.split('?')[0]} (${r.page === 'direct' ? 'straight from Supabase' : r.page === 'owner' ? "owner's page" : r.page === 'both' ? 'both pages' : "stranger's page"}) -> ${r.status ?? r.error}${r.hit ? ", **owner's canary in the response**" : ''}`,
       ),
       '',
     )
@@ -288,7 +325,7 @@ function report(cfg, r) {
 // The table a failing probe points at: the response that carried the canary, else the API checks' row,
 // else the only table its pages read.
 const tableOf = (p) =>
-  [...(p.evidence ?? []), ...(p.anonymous ?? [])].find((h) => h.url)?.url?.match(/\/rest\/v1\/(?!rpc\/)([A-Za-z0-9_]+)/)?.[1] ??
+  [...(p.evidence ?? []), ...(p.anonymous ?? [])].map((h) => h.url?.match(/\/rest\/v1\/(?!rpc\/)([A-Za-z0-9_]+)/)?.[1]).find(Boolean) ??
   (p.findings ?? []).find((f) => f.table)?.table ??
   p.api?.row?.table ??
   (p.tables?.length === 1 ? p.tables[0] : undefined)
@@ -297,6 +334,18 @@ const tableOf = (p) =>
 const READ_SEEN = new Set(['page', 'network', 'anonymous', 'direct-link'])
 const hits = (p) => [...(p.evidence ?? []), ...(p.anonymous ?? [])]
 const rpcNames = (p) => [...new Set(hits(p).map((h) => h.url?.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/)?.[1]).filter(Boolean))]
+
+// How the owner's rows reached the stranger: through the pages' own Supabase reads ('rest'), through a
+// table read straight from Supabase that no page read ('direct'), or only through the app's own server
+// endpoints ('server'). It picks the first lines of the brief.
+function leakPath(failing) {
+  const found = failing.flatMap(hits).filter((h) => h.url)
+  const supabaseRead = (h) => h.page !== 'direct' && /\/rest\/v1\//.test(h.url)
+  if (found.some(supabaseRead)) return 'rest'
+  if (found.some((h) => h.page === 'direct')) return 'direct'
+  if (found.length && !failing.some((p) => (p.replay ?? []).some(supabaseRead))) return 'server'
+  return 'rest'
+}
 
 const TITLES = { LEAK: 'Stranger found a data leak', TAMPER: "Stranger found that the stranger can change the owner's data", OVERLOCKED: 'Stranger found someone locked out who should see the data' }
 
@@ -324,6 +373,7 @@ function fix(cfg, r) {
   const aggregate = failing.some((p) => p.findings?.some((f) => f.seen === 'aggregate'))
   const persona = failing.some((p) => p.findings?.some((f) => f.seen === 'persona'))
   const known = [...new Set(failing.map(tableOf))].filter(Boolean)
+  const via = leakPath(failing)
   const impacts = (r.blast ?? []).filter((entry) => hasExposedRows(entry) && (!known.length || known.includes(entry.table)))
 
   const found = (p) => {
@@ -348,7 +398,7 @@ function fix(cfg, r) {
   const perTable = (t) => {
     const lines = []
     // A view has no policies of its own: its fix is security_invoker (in "extra" below).
-    if ((readLeak || persona) && !views.has(t)) lines.push(...hint(cfg, t), '')
+    if ((readLeak || persona) && !views.has(t)) lines.push(...hint(cfg, t, { live: t ? r.live?.[t] : undefined, via }), '')
     if (aggregate) {
       lines.push(
         "Something the stranger reads adds up or counts rows without checking who is asking: usually a view or a database function. In Postgres a view runs with its creator's rights unless it is made with `with (security_invoker = true)`, and a `security definer` function skips row level security too. Make them respect the caller, or filter by `auth.uid()` inside.",

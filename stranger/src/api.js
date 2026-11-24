@@ -57,10 +57,12 @@ export async function replayReads(reads, needle, strangerLogin, onRead) {
       const r = await call('GET', req.url, headers)
       onRead?.(req.url, as, r)
       const out = { as, page: req.page, method: 'GET', url: req.url, status: r.status, hit: false }
+      if (req.table) out.table = req.table
       if (r.error) out.error = r.error
       if (r.ok && r.text.includes(needle)) {
         out.hit = true
-        out.where = `${req.page === 'owner' ? "the owner's page read" : "the stranger's page read"}, sent again ${as === 'stranger' ? "with the stranger's login" : 'with no login'}`
+        const login = as === 'stranger' ? "with the stranger's login" : 'with no login'
+        out.where = req.page === 'direct' ? `the \`${req.table}\` table, read straight from Supabase ${login}` : `${req.page === 'owner' ? "the owner's page read" : "the stranger's page read"}, sent again ${login}`
         out.snippet = needle
       }
       results.push(out)
@@ -172,6 +174,27 @@ export function blastRadius(cfg, strangerLogin) {
 export function supabaseTarget(reads) {
   const r = reads.find((x) => x.url.includes('/rest/v1/') && x.headers.apikey)
   return r ? { base: r.url.slice(0, r.url.indexOf('/rest/v1/')), apikey: r.headers.apikey } : null
+}
+
+// The user tables (from the migrations) that no page read through the data API, as reads straight from
+// Supabase. An app that loads its data through its own server code never calls the data API from the
+// browser, yet its sign-in hands anyone the project's address and public key, so the tables are only as
+// closed as their row level security. PostgREST caps each read at its max rows (1000 on Supabase).
+export function directReads(target, tables, reads) {
+  const covered = new Set(reads.map((r) => r.url.match(/\/rest\/v1\/(?!rpc\/)([A-Za-z0-9_]+)/)?.[1]).filter(Boolean))
+  return tables
+    .filter((t) => !covered.has(t))
+    .map((table) => ({ url: `${target.base}/rest/v1/${table}?select=*`, headers: { apikey: target.apikey, 'accept-profile': 'public' }, page: 'direct', table }))
+}
+
+// A login the Supabase API takes: the one the page sent, if Supabase accepts it, else a password sign-in
+// with the account from the config. The token stays in memory.
+export async function dbLogin(target, login, account) {
+  if (login.authorization) {
+    const r = await call('GET', `${target.base}/auth/v1/user`, { apikey: target.apikey, authorization: login.authorization })
+    if (r.ok) return { authorization: login.authorization }
+  }
+  return account?.email && account?.password ? await signIn(target, account.email, account.password) : null
 }
 
 const rest = (target, login, extra = {}) => ({ apikey: target.apikey, 'accept-profile': 'public', 'content-profile': 'public', ...login, ...extra })

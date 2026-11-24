@@ -42,6 +42,9 @@ export function loadConfig(path = DEFAULT_CONFIG, overrides = {}) {
   cfg.storage ??= cfg.database === 'supabase'
   cfg.realtime ??= cfg.database === 'supabase'
   cfg.rpc ??= cfg.database === 'supabase'
+  // Read the user tables straight from Supabase when none of the pages' data reads holds the canary (an
+  // app that loads its data through its own server code).
+  cfg.direct ??= cfg.database === 'supabase'
   // Open the owner's own record pages directly as the stranger (when the owner's run visited any).
   cfg.links ??= true
   cfg.realtimeTopics = Array.isArray(cfg.realtimeTopics) ? cfg.realtimeTopics.map(String) : []

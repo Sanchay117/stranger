@@ -64,6 +64,8 @@ function project({ probes, personas, migrations = [['0001_invoices.sql', LEAKY]]
 //   rpc:       'own' | 'all'              what POST /rest/v1/rpc/<any> returns
 //   files:     'private' | 'shared' | 'public'  who may download a stored file
 //   realtime:  null | 'private' | 'broadcast' | 'changes'  the live-updates socket (null: no socket)
+//   server:    'rls' | 'own'              what the app's own server code (GET /_serverFn/list) returns: what
+//                                         row level security lets the caller read, or only the caller's rows
 // Rows: the owner's canaries (from the stand-in Kane's planted.txt) and one row of the stranger's.
 const api = {}
 let server
@@ -99,6 +101,7 @@ before(async () => {
     const who = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).sub : null
     if (auth && !who) return json(401, { message: 'bad token' })
     if (url.pathname.startsWith('/storage/v1/object/')) return storage(req, url, who, body, json, res)
+    if (url.pathname.startsWith('/_serverFn/')) return who ? json(200, api.rows.filter((r) => (api.server === 'own' ? r.user_id === who : r.user_id === who || api.stranger === 'all'))) : json(401, { message: 'no' })
     if (!who && api.anon === 'refuse') return json(401, { message: 'no' })
     const fn = url.pathname.match(/^\/rest\/v1\/rpc\/(\w+)/)?.[1]
     if (fn) return json(200, api.rows.filter((r) => api.rpc === 'all' || r.user_id === who))
@@ -226,9 +229,9 @@ function liveInsert(row) {
   }
 }
 
-function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {}, rows = [], responseLimit = Infinity, exactCount = false, insert = 'own', rpc = 'own', files = 'private', realtime = null } = {}) {
+function setApi(p, { stranger = 'own', anon = 'refuse', write = 'own', totals = 'own', teammates = [], accounts = {}, rows = [], responseLimit = Infinity, exactCount = false, insert = 'own', rpc = 'own', files = 'private', realtime = null, server = 'rls' } = {}) {
   const seeded = rows.map((row, i) => ({ amount_cents: 100, id: i + 1, ...row }))
-  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, exactCount, responseLimit, insert, rpc, files, realtime, stored: [], heard: [], rows: seeded, synced: new Set(), nextId: seeded.length + 1, seen: [] })
+  Object.assign(api, { dir: p.kane, stranger, anon, write, totals, teammates, accounts, exactCount, responseLimit, insert, rpc, files, realtime, server, stored: [], heard: [], rows: seeded, synced: new Set(), nextId: seeded.length + 1, seen: [] })
 }
 
 const env = (p, modes, extra = {}) => ({ ...process.env, ...extra, KANE_CLI_BIN: FAKE, FAKE_KANE_DIR: p.kane, FAKE_KANE_MODES: modes, FAKE_KANE_FORBID: PASSWORD, FAKE_KANE_API: API })
@@ -520,8 +523,10 @@ test('blast radius: keeps captured filters even when the stand-in policy is open
   const r = await run(p, 'clean', { FAKE_KANE_FILTERED: '1' })
   assert.equal(r.out.verdict, 'CLEAN')
   assert.equal(invoiceCounts(r).stranger.othersRows, 0)
-  assert.equal(api.seen.length, 2)
-  assert.ok(api.seen.every(({ method, query }) => method === 'GET' && query.includes('user_id=eq.stranger')))
+  // The owner's page logged no read, so Stranger tries a sign-in to read the canary back (no accounts here).
+  const reads = api.seen.filter((x) => x.path.startsWith('/rest/v1/'))
+  assert.equal(reads.length, 2)
+  assert.ok(reads.every(({ method, query }) => method === 'GET' && query.includes('user_id=eq.stranger')))
 })
 
 test('blast radius: disabling it omits the counts and uses the same requests', async () => {
@@ -759,6 +764,75 @@ test('live updates: nothing heard on private channels is CLEAN', async () => {
   const r = await run(p, 'clean')
   assert.equal(r.out.verdict, 'CLEAN', r.out.why)
   assert.match(r.read('report.md'), /## Live updates[\s\S]*Joined: `database changes on invoices`, `invoices:\{owner\}`[\s\S]*Heard nothing of the owner's row\./)
+})
+
+// An app that loads its data through its own server code (TanStack Start, Next.js server actions): the
+// browser signs in with Supabase but never reads its tables, so only the sign-in names the project.
+test('server code: filtered by account in the app, but the table is open, is a LEAK from a direct read', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fix.sql', FIXED]] })
+  setApi(p, { stranger: 'all', server: 'own' })
+  const r = await run(p, 'clean', { FAKE_KANE_SERVER_FN: '1' })
+  assert.equal(r.out.verdict, 'LEAK', r.stderr)
+  const last = JSON.parse(r.read('last.json'))
+  assert.equal(last.seen, 'network')
+  assert.match(r.out.why, /The app's pages looked clean, but the `invoices` table, read straight from Supabase with the stranger's login, returns the owner's canary/)
+  assert.ok(api.seen.some((x) => x.method === 'GET' && x.path === '/rest/v1/invoices' && x.auth === `Bearer ${token('stranger')}`), "read with the stranger's login")
+  assert.ok(api.seen.some((x) => x.method === 'GET' && x.path === '/rest/v1/invoices' && !x.auth && x.apikey === 'public-anon-key'), 'and with no login')
+  const report = r.read('report.md')
+  assert.match(report, /found it in `invoices`/)
+  assert.match(report, /With the stranger's login: GET .*\/rest\/v1\/invoices \(straight from Supabase\) -> 200, \*\*owner's canary in the response\*\*/)
+  assert.match(report, /With the stranger's login: GET .*\/_serverFn\/list \(both pages\) -> 200$/m)
+  const fix = r.read('FIX.md')
+  assert.match(fix, /signs in with Supabase from the browser/)
+  assert.match(fix, /\(table `invoices`\)/)
+  assert.doesNotMatch(fix, /reads its data straight from Supabase/)
+  // The canary row was found, so the row checks ran too, as they do for an app that reads Supabase itself.
+  assert.equal(last.probes[0].api.row.table, 'invoices')
+  assert.equal(last.probes[0].api.tamper.ran, true)
+})
+
+test('server code: without the direct read ("direct": false) the open table goes unnoticed, the gap it closes', async () => {
+  const p = project({ options: { direct: false } })
+  setApi(p, { stranger: 'all', server: 'own' })
+  const r = await run(p, 'clean', { FAKE_KANE_SERVER_FN: '1' })
+  assert.equal(r.out.verdict, 'CLEAN', r.stderr)
+  assert.ok(!api.seen.some((x) => x.path === '/rest/v1/invoices' && x.auth === `Bearer ${token('stranger')}`))
+})
+
+test('server code: the same app with the table locked down stays CLEAN, and the direct read is reported', async () => {
+  const p = project()
+  setApi(p, { stranger: 'own', server: 'own' })
+  const r = await run(p, 'clean', { FAKE_KANE_SERVER_FN: '1' })
+  assert.equal(r.out.verdict, 'CLEAN', r.stderr)
+  assert.match(r.read('report.md'), /With the stranger's login: GET .*\/rest\/v1\/invoices \(straight from Supabase\) -> 200$/m)
+  assert.ok(!JSON.parse(r.read('last.json')).probes[0].api.notes.some((n) => /need a Supabase API/.test(n)), 'the sign-in named the project')
+})
+
+test('server code: a page login Supabase does not take falls back to a password sign-in', async () => {
+  const p = project()
+  setApi(p, { stranger: 'all', server: 'own', accounts: ACCOUNTS })
+  const r = await run(p, 'clean', { FAKE_KANE_SERVER_FN: '1', FAKE_KANE_BAD_TOKEN: '1' })
+  assert.equal(r.out.verdict, 'LEAK', r.stderr)
+  assert.ok(api.seen.some((x) => x.path === '/auth/v1/token' && x.method === 'POST'), 'signed in')
+  assert.ok(!r.read('last.json').includes(PASSWORD) && !r.read('report.md').includes(PASSWORD), 'the password stays out of the results')
+})
+
+test('fix brief: row level security turned off by hand in the live database is named, with the one-line fix', async () => {
+  const p = project({ migrations: [['0001_invoices.sql', LEAKY], ['0002_fix.sql', FIXED]] })
+  setApi(p, { stranger: 'all', server: 'own' })
+  await run(p, 'clean', { FAKE_KANE_SERVER_FN: '1' })
+  const lastFile = join(p.root, '.stranger', 'last.json')
+  const last = JSON.parse(readFileSync(lastFile, 'utf8'))
+  last.live = { invoices: { rls: false, policies: [{ name: 'Users can read their own invoices', command: 'select', roles: 'authenticated', using: '(( SELECT auth.uid() AS uid) = user_id)', open: false }] } }
+  writeFileSync(lastFile, JSON.stringify(last))
+  const r = await spawnAsync([BIN, 'report'], { cwd: p.root, env: env(p, 'clean') })
+  assert.equal(r.status, 0, r.stderr)
+  const fix = readFileSync(join(p.root, '.stranger', 'FIX.md'), 'utf8')
+  assert.match(fix, /Row Level Security is \*\*off\*\* for `invoices` in the live database right now/)
+  assert.match(fix, /Your migrations turn it on, so it was turned off by hand/)
+  assert.match(fix, /alter table public\.invoices enable row level security;/)
+  assert.match(fix, /no new policy is needed/)
+  assert.doesNotMatch(fix, /drop policy|create policy/)
 })
 
 test('direct links: the list hides the record, but its own page shows it to the stranger', async () => {
