@@ -16,13 +16,13 @@ const expired = ran.some((c) => !kaneLink(byId[c.id]))
 
 const HOW = {
   page: 'on the page',
-  network: 'API replay',
-  anonymous: 'no-login replay',
-  'direct-link': 'direct link',
-  forged: 'forged owner',
-  aggregate: 'numeric canary',
-  storage: 'files',
-  realtime: 'live updates',
+  network: 'via API replay',
+  anonymous: 'via no-login replay',
+  'direct-link': 'via direct link',
+  forged: 'via forged owner',
+  aggregate: 'via numeric canary',
+  storage: 'via files',
+  realtime: 'via live updates',
 }
 
 export default function Scorecard() {
@@ -75,7 +75,7 @@ export default function Scorecard() {
                 <p className="muted small">
                   Expected {c.expect.verdict}
                   {c.expect.seen.length ? ` (${c.check.toLowerCase()})` : ''}.
-                  {r ? ` Stranger said ${r.verdict}${r.seen ? `, via ${HOW[r.seen] ?? r.seen}` : ''}.` : ''}
+                  {r ? ` Stranger said ${r.verdict}${r.seen ? `, ${HOW[r.seen] ?? `via ${r.seen}`}` : ''}.` : ''}
                 </p>
                 {r && (
                   <p className="small">

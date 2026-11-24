@@ -26,7 +26,8 @@
     "bench": "node --env-file=.env bench/run.mjs",
     "demo": "npm --prefix demo run dev",
     "stranger": "node stranger/bin/stranger.js run",
-    "test": "node --test stranger/test/stranger.test.js"
+    "verify": "node stranger/bin/stranger.js verify",
+    "test": "node --test stranger/test/*.test.js"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.119.0",

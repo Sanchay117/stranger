@@ -7,6 +7,7 @@ import { check } from '../src/check.js'
 import { blastRows, renderReport, writeReport } from '../src/report.js'
 import { ensureGitignore, installClaude } from '../src/install.js'
 import { checkGuards, loadGuards, logGuardRun, recordGuards, runKaneGuards, updateStates } from '../src/guards.js'
+import { renderDemo, verifyEvidence } from '../src/verify.js'
 
 const HELP = `stranger: you only ever test your app as yourself. Stranger tests it as someone else.
 
@@ -18,6 +19,8 @@ Usage
   stranger guard           Check every leak found before is still closed (no Kane run, no credits)
   stranger guard --kane    Also replay the Kane guard tests with kane-cli testrun (one evidence pack)
   stranger guard --record  Turn the last run's leaks into guards (no Kane run)
+  stranger verify          Verify committed evidence, recompute bench scores and check for leaked secrets
+  stranger demo            Walk through real committed runs in under a second (no login, no credits)
 
 Options
   --config <path>  Config file (default: stranger.config.json)
@@ -59,6 +62,40 @@ const say = (line = '') => {
 if (values.help || command === 'help') {
   console.log(HELP)
   process.exit(0)
+}
+
+if (command === 'demo') {
+  const out = await renderDemo(process.cwd(), { bold, dim, green, red, yellow })
+  console.log(out.text)
+  process.exit(out.ok ? 0 : 1)
+}
+
+if (command === 'verify') {
+  const res = await verifyEvidence(process.cwd())
+  if (values.json) {
+    process.stdout.write(JSON.stringify(res) + '\n')
+  } else {
+    const tag = res.ok ? green('VERIFIED') : red('FAILED')
+    console.log(`${tag}  ${res.hashedFiles} evidence files · sha256 ${res.digest}`)
+    if (res.history.runs) {
+      const counts = Object.entries(res.history.verdicts).map(([k, v]) => `${v} ${k}`).join(', ')
+      console.log(`  Runs:        ${res.history.runs} logged in .stranger/history.jsonl (${counts}, ${Math.round(res.history.credits)} credits)`)
+    }
+    if (res.guards.runs) {
+      console.log(`  Guards:      ${res.guards.runs} logged in .stranger/guards/history.jsonl (${res.guards.replayedTotal} steps replayed, ${Math.round(res.guards.credits)} credits)`)
+    }
+    if (res.bench) {
+      console.log(`  Bench:       ${res.bench.bugsCaught} of ${res.bench.bugsTotal} bugs caught, control ${res.bench.controlClean ? 'CLEAN' : 'FAILED'} (${res.bench.saved}/${res.bench.cases} saved, ${res.bench.credits} credits)`)
+    }
+    if (res.savedRuns) {
+      console.log(`  Saved pages: ${res.savedRuns.count} Kane run pages in demo/public/runs/ (${res.savedRuns.screenshots} screenshots, zero secrets or JWTs)`)
+    }
+    if (res.field) {
+      console.log(`  Field tests: ${res.field.docs} docs in field/ (${res.field.linkedRuns.length} linked saved runs)`)
+    }
+    for (const err of res.errors) console.error(`  ${red('✗')} ${err}`)
+  }
+  process.exit(res.ok ? 0 : 1)
 }
 
 // Kane writes the test accounts' passwords into its run folder, so run folders never go into git.

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install root dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run offline tests
+        run: npm test
+
+      - name: Verify committed evidence
+        run: npm run verify
+
+      - name: Check demo walkthrough
+        run: node stranger/bin/stranger.js demo
+
+      - name: Build site, Duebook and bench
+        run: |
+          npm ci --prefix demo --no-audit --no-fund
+          npm run build --prefix demo
+          test -f demo/dist/index.html
+          test -f demo/dist/duebook/index.html
+          test -f demo/dist/bench/index.html
+          test -f demo/dist/runs/afb57e/index.html
+          test -f demo/dist/runs/bench-all_good/index.html
