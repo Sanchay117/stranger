@@ -7,5 +7,5 @@ Turning off row-level security in our local database gave Kane a [visible leak](
 Filtering notes in the app's server code hid the note from the page. Stranger still [found it in Supabase](https://stranger-2yf3.vercel.app/runs/106ece/).
 That test led to two changes in Stranger. It can now check tables behind server functions and write a fix brief when row-level security was turned off.
 
-We also reviewed PennyFlow's shipped access policies. Its live Kane check is pending.
+PennyFlow, a Vite finance tracker that reads Supabase from the browser, closed the whole loop: [CLEAN](https://stranger-2yf3.vercel.app/runs/3555e0/) as shipped, a [LEAK](https://stranger-2yf3.vercel.app/runs/56eb00/) with row-level security turned off in our local database, a migration written by a fresh Claude Code agent from the fix brief alone, then [CLEAN](https://stranger-2yf3.vercel.app/runs/10dfea/) with a fresh canary.
 See the [field-test notes and fix brief](field/README.md) for the full evidence.

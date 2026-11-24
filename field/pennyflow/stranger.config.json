@@ -1,0 +1,10 @@
+{
+  "url": "http://127.0.0.1:5301/",
+  "owner": { "email": "$OWNER_EMAIL", "password": "$OWNER_PASSWORD" },
+  "stranger": { "email": "$STRANGER_EMAIL", "password": "$STRANGER_PASSWORD" },
+  "plant": "open Transactions from the top navigation, click Add Transaction, enter 12.34 into Amount, keep Expense selected, select Food in the Category dropdown, keep today's Date, type the text into Note, and click Add. If Food is missing, first open Categories and create a category named Food, then return to Transactions and add the transaction",
+  "look": "the Transactions page, including the Note column in the table of transactions",
+  "database": "supabase",
+  "migrations": "supabase/migrations",
+  "databaseUrl": "$SUPABASE_DB_URL"
+}
