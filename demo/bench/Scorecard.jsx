@@ -8,6 +8,12 @@ const found = bugs.filter((c) => caught(c, byId[c.id]))
 const control = CASES.find((c) => c.expect.verdict === 'CLEAN')
 const quiet = control && byId[control.id] ? caught(control, byId[control.id]) : null
 
+// Kane's share links expire after seven days. Link a saved copy if there is one
+// (scripts/save-kane-runs.mjs --bench), else Kane's own link while it still opens.
+const SHARE_DAYS = 7
+const kaneLink = (r) => r.saved ?? (r.strangerRun && Date.now() < Date.parse(r.at) + SHARE_DAYS * 864e5 ? r.strangerRun : null)
+const expired = ran.some((c) => !kaneLink(byId[c.id]))
+
 const HOW = {
   page: 'on the page',
   network: 'API replay',
@@ -43,6 +49,7 @@ export default function Scorecard() {
             <p className="muted">
               {quiet === true ? `and stayed quiet on the clean control. ` : quiet === false ? 'but raised a false alarm on the clean control. ' : ''}
               Real Kane CLI runs against {results.url}, {new Date(results.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}, {Math.round(results.credits)} Kane credits in all.
+              {expired ? ' Kane keeps its share links for seven days, so for older runs the report shows what Kane did: its result, time, credits and summary.' : ''}
             </p>
           </section>
         ) : (
@@ -72,8 +79,8 @@ export default function Scorecard() {
                 </p>
                 {r && (
                   <p className="small">
-                    {r.strangerRun && (
-                      <a className="link" href={r.strangerRun}>
+                    {kaneLink(r) && (
+                      <a className="link" href={kaneLink(r)}>
                         Kane run
                       </a>
                     )}{' '}

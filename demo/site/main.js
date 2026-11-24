@@ -6,6 +6,7 @@ import { art, sky, tear } from './sky.js'
 initTheme()
 
 const REPO = 'https://github.com/Sanchay117/stranger'
+const savedRun = `/runs/${replay.id}/`
 const NPX = 'npx github:Sanchay117/stranger'
 const DEMO_HOST = `${location.host}/duebook`
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -178,7 +179,7 @@ async function renderReplay(instant) {
     <div class="console-body fixed" tabindex="0" aria-label="Kane run log"></div>
     <div class="console-actions" hidden>
       <a class="primary" href="/duebook/?as=stranger" target="_blank" rel="noopener">See it yourself, as the stranger ↗</a>
-      <a href="${esc(replay.strangerRun.testUrl)}" target="_blank" rel="noopener">Kane's run page ↗</a>
+      <a href="${savedRun}" target="_blank" rel="noopener">Kane's run page ↗</a>
       <a href="${REPO}/blob/main/.stranger/FIX.md" target="_blank" rel="noopener">The fix brief ↗</a>
     </div>
     <p class="console-note" hidden>The live Duebook stays leaky on purpose, so you can check the leak with your own eyes.</p>`
@@ -269,7 +270,9 @@ consoleEl.addEventListener('click', async (e) => {
 })
 
 // ---------- Proof links ----------
-document.querySelectorAll('.kane-run').forEach((a) => (a.href = replay.strangerRun.testUrl))
+// Kane's share links expire after seven days, so these open a saved copy of the run
+// (scripts/save-kane-runs.mjs): Kane's own steps and screenshots.
+document.querySelectorAll('.kane-run').forEach((a) => (a.href = savedRun))
 
 // ---------- Tabs ----------
 const tabs = [...document.querySelectorAll('[role="tab"]')]

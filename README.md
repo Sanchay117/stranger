@@ -57,11 +57,11 @@ On branch [`agent-loop`](https://github.com/Sanchay117/stranger/tree/agent-loop)
 
 | Step | What happened |
 | --- | --- |
-| Agent adds the search box and tries to stop | The hook runs Stranger on the live Duebook: **LEAK** `f5b2cc` ([Kane run](https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7JBVNX0WRHTEJF9MXTP1E39/dashboard/share/US_4UGM76WIWN73PFNGZ2X23WBXQTDH8PYUZ8CW2D2AJ3E0CIXFCJHBNVUB34ZUDGL4?type=summary&agentView=true&fqdn=summary-page)) |
+| Agent adds the search box and tries to stop | The hook runs Stranger on the live Duebook: **LEAK** `f5b2cc` ([Kane run](https://stranger-2yf3.vercel.app/runs/f5b2cc/)) |
 | Agent reads `.stranger/FIX.md` | Writes [`0002_invoices_owner_read.sql`](https://github.com/Sanchay117/stranger/blob/agent-loop/supabase/migrations/0002_invoices_owner_read.sql), applies it, commits `59c1942` |
-| Agent tries to stop again | The hook re-runs Stranger with a new canary: **CLEAN** `c789a7` ([Kane run](https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M7JC8WCN8W9WJMZ716MDTQPE/dashboard/share/US_LQHHOX2UJNLEXWU8GC96XO8BVWJSI0PA1N12I4DL8J26G5X2909QXM8HTV8ZKK8S?type=summary&agentView=true&fqdn=summary-page)) |
+| Agent tries to stop again | The hook re-runs Stranger with a new canary: **CLEAN** `c789a7` ([Kane run](https://stranger-2yf3.vercel.app/runs/c789a7/)) |
 
-After that, `npm run demo:reset` put the live leak back, so you can still see it. `main` stays leaky on purpose; the fix lives on its branch as proof. Every real run is logged in [`.stranger/history.jsonl`](.stranger/history.jsonl) with its Kane link. Kane's share links open without a TestMu login.
+After that, `npm run demo:reset` put the live leak back, so you can still see it. `main` stays leaky on purpose; the fix lives on its branch as proof. Every real run is logged in [`.stranger/history.jsonl`](.stranger/history.jsonl) with its Kane link. Kane's share links expire after seven days, so the Kane run links above open saved copies: Kane's own steps and screenshots from each run's evidence pack, made with [`scripts/save-kane-runs.mjs`](scripts/save-kane-runs.mjs).
 
 ## Use it on your own app
 
