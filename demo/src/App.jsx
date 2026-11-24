@@ -242,7 +242,10 @@ function Invoices({ session }) {
 
         {error && <p className="message">{error}</p>}
 
-        <h2>Your invoices</h2>
+        <h2>
+          Your invoices
+          {!loading && invoices.length > 0 && <span className="muted"> · {invoices.length}</span>}
+        </h2>
         {loading ? (
           <p className="muted">Loading</p>
         ) : invoices.length === 0 ? (
