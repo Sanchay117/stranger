@@ -1,5 +1,7 @@
 # Stranger
 
+[![CI](https://github.com/Sanchay117/stranger/actions/workflows/ci.yml/badge.svg)](https://github.com/Sanchay117/stranger/actions/workflows/ci.yml)
+
 **You only ever test your app as yourself. Stranger tests it as someone else.**
 
 Stranger uses [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) to sign in to your app as one user, hide a random word in their data, then sign in as a *different* user and look for it. If the second user can see it, your app leaks people's data to each other. Your coding agent gets a fix brief, fixes the database, and Stranger checks again until it is clean.
@@ -11,6 +13,15 @@ Built for the Kane CLI Online Hackathon (TestMu AI).
 - **See the leak yourself (one click, no sign-up):** https://stranger-2yf3.vercel.app/duebook/?as=stranger
 
 [![Stranger demo video: Kane CLI signs in as a stranger and finds another user's invoice](film/thumbnail.jpg)](https://youtu.be/zqxBkeSFtss)
+
+## For judges: one minute per criterion
+
+| Criterion | Check it yourself |
+| --- | --- |
+| **Ships** | [Open the live leak as a stranger](https://stranger-2yf3.vercel.app/duebook/?as=stranger), no sign-up. Or run `npx --yes github:Sanchay117/stranger demo` for the whole story in your terminal: no login, no network calls, no credits. |
+| **Verified** | [The bench](https://stranger-2yf3.vercel.app/bench/): 9 of 9 planted bugs caught in real Kane CLI runs, and the clean control stayed clean. [Tried on a real app we didn't write](#tried-on-real-apps-we-didnt-write). In a clone, `npm run verify` recomputes every piece of evidence: 18 saved Kane run pages, no secrets in any of them. |
+| **Closed loop** | [A coding agent fixed a leak it was never told about](#proof-the-loop-really-closed): LEAK [`f5b2cc`](https://stranger-2yf3.vercel.app/runs/f5b2cc/), its migration, then CLEAN [`c789a7`](https://stranger-2yf3.vercel.app/runs/c789a7/). The [same loop runs in CI](#fix-loop-in-ci-no-human-in-it) with no human in it. |
+| **Craft** | A [fix brief](https://github.com/Sanchay117/stranger/blob/main/bench/cases/rls_off/.stranger/FIX.md) that names the exact policy to change. [Leak guards](#leak-guards-kane-finds-a-leak-once-the-guard-keeps-it-found) that replayed with zero healing after a full redesign. |
 
 ## Why
 
@@ -49,6 +60,8 @@ Duebook is a small invoicing app we built with the leak left in **on purpose**, 
 - [Open Duebook as Maya](https://stranger-2yf3.vercel.app/duebook/?as=owner), the owner, to compare.
 
 It is worse than it looks: Stranger's replay found that Duebook's API returns every invoice even **with no login at all**, to anyone who has the site's public key (run `cf7845`).
+
+Kane checked the live Duebook again on 24 Nov with Kane CLI 0.10.9, after the redesign: still **LEAK**, as it should be ([run `e18167`](https://stranger-2yf3.vercel.app/runs/e18167/)). Kane saw Maya's canary on the stranger's page, and the stranger's login and no login both got it from the API.
 
 The demo accounts are public on purpose. Please don't type real details into Duebook.
 
@@ -139,6 +152,19 @@ The bench is one small notes app with ten cases on one Supabase project. Each ca
 - Each case's report and fix brief: [`bench/cases/`](bench/cases/)
 - Try a case yourself, one click, no sign-up: [as Maya, the owner](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=owner) or [as a stranger](https://stranger-2yf3.vercel.app/bench/?case=detail_page&as=stranger). Open one of Maya's notes, copy its address, and open it as the stranger.
 
+## Tried on real apps we didn't write
+
+We ran Stranger on Notely, a Lovable notes app that loads data through TanStack Start server functions. We tested a local copy on a throwaway Supabase database, never the hosted app.
+
+| Setup | What Stranger said |
+| --- | --- |
+| The app as shipped | [CLEAN](https://stranger-2yf3.vercel.app/runs/115d8f/) |
+| Row level security turned off in our local database | [LEAK](https://stranger-2yf3.vercel.app/runs/e7ff8f/): Kane saw the owner's note on the stranger's page |
+| Same, after Stranger learned to read tables behind server code | [LEAK](https://stranger-2yf3.vercel.app/runs/a9bd3f/), plus edits, deletes and inserts in the owner's name |
+| The app's server code filters notes by account, row level security still off | [LEAK](https://stranger-2yf3.vercel.app/runs/106ece/): the page hid the note, but Stranger found it straight in Supabase |
+
+That test changed Stranger twice: it now checks tables behind server functions ([`4e20df9`](https://github.com/Sanchay117/stranger/commit/4e20df9)), and its fix brief names row level security turned off by hand, with the one-line fix ([`df8770a`](https://github.com/Sanchay117/stranger/commit/df8770a)). We also reviewed the access policies PennyFlow ships; its live Kane check is pending. The full evidence is in [`field/README.md`](field/README.md).
+
 ## Leak guards: Kane finds a leak once, the guard keeps it found
 
 Every leak Stranger finds becomes a guard, in two layers:
@@ -202,6 +228,12 @@ npm test
 Runs Stranger end to end against a stand-in Kane (`stranger/test/fake-kane.js`): page leaks, leaks only the server shows, owner-page reads, logged-out leaks, the numeric canary, tamper, personas, coverage, clean and inconclusive runs, several probes and the Stop hook, against a stand-in Supabase with switchable security rules. No Kane credits.
 
 ```bash
+npm run verify
+```
+
+Recomputes the evidence from the repo: every run in `.stranger/history.jsonl`, the guard runs, the bench results against each case's report, every saved Kane run page and its screenshots, and the field-test notes. It fails on a missing file, a dead `/runs/` link, a login token, a `.env` secret or a local path, and prints a SHA-256 digest of it all. CI runs it on every push, along with the tests, `stranger demo` and the site build.
+
+```bash
 cd demo && npm install && npm run dev
 ```
 
@@ -210,8 +242,10 @@ The product page at `/` and Duebook at `/duebook/`, on port 5231. Duebook needs 
 | Folder | What is in it |
 | --- | --- |
 | `stranger/` | The CLI, the Claude Code skill and Stop hook, and tests. No runtime dependencies (`pg` is used only if installed, for live policies). |
-| `.github/workflows/` | The pull request gate. |
-| `demo/` | The product page and Duebook (React + Supabase). |
+| `.github/workflows/` | CI, the pull request gate and the fix loop. |
+| `demo/` | The product page, Duebook (React + Supabase), the bench page and the saved Kane run pages (`demo/public/runs/`). |
+| `bench/` | The ten bench cases, their migrations, runner and reports. |
+| `field/` | Field tests on apps we didn't write. |
 | `supabase/migrations/` | Duebook's schema, including the leaky read policy. |
 | `scripts/` | Apply migrations, seed demo data, reset the live leak, export a run for the page. |
 
