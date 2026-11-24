@@ -36,6 +36,7 @@ if (!values['no-reset'] && picked.length) {
 }
 
 const resultsFile = join(root, 'demo', 'bench', 'results.json')
+const SITE = 'https://stranger-2yf3.vercel.app'
 const previous = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, 'utf8')) : { cases: [] }
 // Older results are re-judged with the current expectations in cases.js.
 const kept = new Map((previous.cases ?? []).map((r) => [r.id, { ...r, caught: caught(CASES.find((c) => c.id === r.id) ?? { expect: { verdict: '', seen: [] } }, r) }]))
@@ -95,7 +96,9 @@ const control = CASES.filter((c) => c.expect.verdict === 'CLEAN').map((c) => kep
 const row = (c) => {
   const r = kept.get(c.id)
   const mark = !r ? 'not run' : r.caught ? (c.expect.verdict === 'CLEAN' ? 'clean, as it should be' : 'caught') : '**missed**'
-  return `| [${c.id}](cases/${c.id}/.stranger/report.md) | ${c.bug} | ${c.expect.verdict} | ${r ? `${r.verdict}${r.seen ? ` (${r.seen})` : ''}` : ''} | ${mark} | ${r?.strangerRun ? `[run](${r.strangerRun})` : ''} |`
+  // Kane's share links expire after seven days; a saved copy (scripts/save-kane-runs.mjs --bench) lasts.
+  const kane = r?.saved ? `[run](${SITE}${r.saved})` : r?.strangerRun ? `[run](${r.strangerRun})` : ''
+  return `| [${c.id}](cases/${c.id}/.stranger/report.md) | ${c.bug} | ${c.expect.verdict} | ${r ? `${r.verdict}${r.seen ? ` (${r.seen})` : ''}` : ''} | ${mark} | ${kane} |`
 }
 writeFileSync(
   join(root, 'bench', 'README.md'),
@@ -113,6 +116,7 @@ writeFileSync(
     ...CASES.map(row),
     '',
     'Each case folder has the run\'s `report.md`, its `FIX.md` (the brief a coding agent gets) and `history.jsonl`.',
+    'Kane\'s share links expire after seven days, so the Kane column opens a saved copy of the run: Kane\'s own steps and screenshots.',
     'The bugs are in [`migrations/`](migrations/), the app is [`demo/bench/`](../demo/bench/), live at `/bench/?case=<case>`.',
     '',
     '## What Stranger does not catch',
