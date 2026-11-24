@@ -1,5 +1,5 @@
 // The Stranger landing page: the sky and its pictures (sky.js), the composer, the replay of a real Kane run, and the tabs.
-import replay from './replay-afb57e.json'
+import replay from './replay-e18167.json'
 import { initTheme } from './theme.js'
 import { art, sky, tear } from './sky.js'
 
@@ -173,7 +173,7 @@ async function renderReplay(instant) {
   const credits = Math.round(replay.ownerRun.credits + replay.strangerRun.credits)
   consoleEl.innerHTML = `
     <div class="console-bar">
-      <span>Replay of a real Kane CLI run against Duebook on localhost, ${esc(when)}. Took ${mins(total)} and ${credits} credits; played back fast.</span>
+      <span>Replay of a real Kane CLI run against the live Duebook, ${esc(when)}. Took ${mins(total)} and ${credits} credits; played back fast.</span>
       <button type="button" data-act="again">Replay</button>
     </div>
     <div class="console-body fixed" tabindex="0" aria-label="Kane run log"></div>

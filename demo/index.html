@@ -75,7 +75,7 @@
 
     <figure class="tear rise" aria-labelledby="tear-cap">
       <div class="tear-art">
-        <svg class="tear-svg" id="tear" viewBox="-40 -30 860 590" role="img" aria-label="Kane's screenshot of Duebook signed in as stranger@duebook.demo. The stranger's own test invoice is at the top, and directly below it is Maya's invoice holding the canary stranger-canary-afb57e.">
+        <svg class="tear-svg" id="tear" viewBox="-40 -30 860 590" role="img" aria-label="Kane's screenshot of Duebook signed in as stranger@duebook.demo. The stranger's own test invoice is at the top, and directly below it is Maya's invoice holding the canary stranger-canary-e18167.">
           <defs>
             <clipPath id="tear-hole"><path id="tear-in" d="M-4 6Q-4 -6 8 -6H772Q784 -6 784 6V526Q784 538 772 538H8Q-4 538 -4 526Z"/></clipPath>
             <filter id="tear-soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
@@ -85,8 +85,8 @@
           <g clip-path="url(#tear-hole)">
             <rect x="-40" y="-30" width="860" height="590" fill="#faf8f4"/>
             <image class="tear-shot" href="/proof/stranger-sees-canary.jpg" x="0" y="0" width="780" height="860"/>
-            <rect class="m-control" x="30" y="182" width="720" height="168" rx="18"/>
-            <rect class="m-canary" x="30" y="343" width="720" height="168" rx="18"/>
+            <rect class="m-control" x="52" y="182" width="675" height="168" rx="18"/>
+            <rect class="m-canary" x="52" y="343" width="675" height="168" rx="18"/>
             <path class="tear-shade" id="tear-shade" d="M-4 6Q-4 -6 8 -6H772Q784 -6 784 6V526Q784 538 772 538H8Q-4 538 -4 526Z" filter="url(#tear-soft)"/>
           </g>
         </svg>
@@ -177,7 +177,7 @@ Done means: stranger run prints CLEAN.</code></pre>
         <div class="mini">
           <p class="mini-head"><span class="dot ok"></span>Kane · maya@duebook.demo</p>
           <p class="mini-row"><span class="mk ok">✓</span>Log in</p>
-          <p class="mini-row"><span class="mk ok">✓</span>Saves <code class="canary">stranger-canary-afb57e</code></p>
+          <p class="mini-row"><span class="mk ok">✓</span>Saves <code class="canary">stranger-canary-e18167</code></p>
           <p class="mini-row"><span class="mk ok">✓</span>The canary is on her page</p>
         </div>
       </div>
@@ -276,7 +276,7 @@ Done means: stranger run prints CLEAN.</code></pre>
       </div>
     </div>
     <ul class="panel" role="tabpanel" id="tab-checks" aria-labelledby="t-checks">
-      <li><b>The owner plants a canary.</b> Kane signs in as your real first account and saves a random string like <code>stranger-canary-afb57e</code>.</li>
+      <li><b>The owner plants a canary.</b> Kane signs in as your real first account and saves a random string like <code>stranger-canary-e18167</code>.</li>
       <li><b>A second account looks for it.</b> Kane signs in as someone else, saves its own control, and checks the control is there, so an empty page can't pass.</li>
       <li><b>Any sight of the canary is a leak.</b> On the page, or in what the server sends: Stranger replays the stranger's own data requests, then again with no login at all.</li>
       <li><b>New canary every run.</b> Old data can't fake a pass, and a fix has to really hold.</li>

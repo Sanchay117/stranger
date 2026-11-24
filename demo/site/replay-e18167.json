@@ -1,0 +1,130 @@
+{
+  "id": "e18167",
+  "at": "2026-11-24T15:47:09.427Z",
+  "verdict": "LEAK",
+  "why": "Signed in as stranger@duebook.demo, Kane found the owner's canary on the page. The server sends it to the stranger from https://ydarovwsupwpcedidgwn.supabase.co/rest/v1/invoices. With no login at all, the API returns it too.",
+  "canary": "stranger-canary-e18167",
+  "control": "stranger-control-e18167",
+  "owner": "maya@duebook.demo",
+  "stranger": "stranger@duebook.demo",
+  "ownerRun": {
+    "status": "passed",
+    "seconds": 147,
+    "credits": 25.6,
+    "testUrl": "https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M873TQRBHPWKZ3J48JDCY73P/dashboard/share/US_P498I5S5DYAVKOT0PRWDTOR7XXR87SHI0XD89LVRR19SCSQXV7O3A81SLFXS8IOM?type=summary&agentView=true&fqdn=summary-page",
+    "steps": [
+      {
+        "ok": true,
+        "text": "navigate: Navigate to https://stranger-2yf3.vercel.app/duebook/"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the email\" into \"Email\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the password\" into \"Password\""
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking Log in button"
+      },
+      {
+        "ok": true,
+        "text": "wait: wait for a button labeled \"New invoice\" to be visible"
+      },
+      {
+        "ok": true,
+        "text": "click: PRIMARY: New invoice; role=button; text=\"New invoice\" | HINTS: white button on t"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"Stranger check\" into \"Client name\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"1\" into \"Amount (USD)\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"stranger-canary-e18167\" into \"Note\""
+      },
+      {
+        "ok": true,
+        "text": "click: Click \"Save invoice\""
+      },
+      {
+        "ok": true,
+        "text": "assert: the text \"stranger-canary-e18167\" is visible on the page"
+      }
+    ]
+  },
+  "strangerRun": {
+    "status": "failed",
+    "seconds": 135,
+    "credits": 34.7,
+    "testUrl": "https://test-manager.lambdatest.com/projects/01M7J50DR7X78CBZ60F58CF03Y/test-cases/01M873Z7V6VEXWXV5MRYQQD6CK/dashboard/share/US_HUMRJRNVABD3PRAP6LWUQN06I39D3X2208MHDR4LXH8KQYXQKDY2XIYSO2YXUX1S?type=summary&agentView=true&fqdn=summary-page",
+    "steps": [
+      {
+        "ok": true,
+        "text": "navigate: Navigate to https://stranger-2yf3.vercel.app/duebook/"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the email\" into \"Email\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"the password\" into \"Password\""
+      },
+      {
+        "ok": true,
+        "text": "click: Clicking Log in button"
+      },
+      {
+        "ok": true,
+        "text": "click: PRIMARY: New invoice; role=button; text=\"New invoice\" | HINTS: position=right si"
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"Stranger check\" into \"Client name\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"1\" into \"Amount (USD)\""
+      },
+      {
+        "ok": true,
+        "text": "type: Type \"stranger-control-e18167\" into \"Note\""
+      },
+      {
+        "ok": true,
+        "text": "click: Click \"Save invoice\""
+      },
+      {
+        "ok": true,
+        "text": "wait: verify the newly entered invoice details remain visible"
+      },
+      {
+        "ok": true,
+        "text": "wait: verify the saved invoice remains visible"
+      },
+      {
+        "ok": true,
+        "text": "wait: Waiting confirm the saved invoice is visible"
+      },
+      {
+        "ok": true,
+        "text": "wait: Open the Your invoices list on the main page; role=heading; text=\"Your "
+      },
+      {
+        "ok": true,
+        "text": "assert: the text \"stranger-control-e18167\" is visible on the page"
+      },
+      {
+        "ok": false,
+        "text": "assert: the text \"stranger-canary-e18167\" does not appear anywhere on the page"
+      }
+    ]
+  }
+}
