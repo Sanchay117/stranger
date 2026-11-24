@@ -23,7 +23,11 @@ export interface Take {
 export interface Live {
   fps: number;
   seconds: number;
+  /** The day it was filmed, as "24 Nov". */
+  filmed?: string;
   marks: Record<string, number>;
+  /** Boxes in the footage's own 1920 × 1080 pixels. */
+  boxes?: Record<string, { x: number; y: number; w: number; h: number }>;
 }
 
 export interface Shot {

@@ -3,7 +3,8 @@
 // records its word timings in public/vo/manifest.json.
 //
 // Every claim is from a real run: LEAK f5b2cc and CLEAN c789a7 (the closed loop, 16 Nov), the
-// request replay of 6541c9 (17 Nov), and the agent's own transcript.
+// request replay of 6541c9 (17 Nov), the agent's own transcript, and the bench (real Kane runs on
+// 19 Nov, demo/bench/results.json: 9 of 9 caught, the clean control CLEAN).
 
 export interface Line {
   id: string;
@@ -46,7 +47,7 @@ export const DEMO: Line[] = [
   { id: "d-ask", text: "It asked before touching the live database. We said yes.", lead: 0.2, tail: 0.4, tempo: 1.04 },
   { id: "d-fix", text: "So it wrote one migration: owners read only their own rows. Applied it. Committed it.", lead: 0.2, tail: 0.6, tempo: 1.04 },
   { id: "d-clean", text: "Then it tried to stop again. Kane planted a fresh canary, and this time the stranger saw only their own rows. Clean.", lead: 0.2, tail: 1.2, tempo: 1.04 },
-  { id: "d-more", text: "Stranger also tries to change and delete the owner's rows, checks that a fix didn't lock teammates out, and never counts an unfinished run as clean.", lead: 0.4, tail: 0.6, tempo: 1.06 },
+  { id: "d-bench", text: "Then we built a bench: ten small apps, nine with a different kind of leak, and one with none. Views, database functions, files, live updates. In real Kane runs, Stranger caught all nine, and called the clean one clean.", lead: 0.4, tail: 0.9, tempo: 1.06 },
   { id: "d-live", text: "One command adds it to your project. And the leak in this film is live. Open Duebook as a stranger, and see Maya's invoices for yourself.", lead: 0.3, tail: 0.8, tempo: 1.04 },
   { id: "d-close", text: "Stranger. Test your app as someone else.", lead: 0.6, tail: 3.2, tempo: 1.0 },
 ];

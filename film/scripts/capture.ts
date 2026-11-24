@@ -3,7 +3,8 @@
 // Writes:
 //
 //   public/capture/live.mp4    1920 × 1080 (a 1440 × 810 page at 4/3 scale)
-//   public/capture/live.json   the second each part starts, and what the page said
+//   public/capture/live.json   the second each part starts, the date filmed, where Maya's first
+//                              invoice sits, and what the page said
 //
 //   node scripts/capture.ts [--url https://stranger-2yf3.vercel.app]
 
@@ -48,6 +49,8 @@ const fill = (until: number) => {
 };
 const marks: Record<string, number> = {};
 const notes: Record<string, string> = {};
+/** Boxes in the footage's own pixels (1920 × 1080), for the film to draw on. */
+const boxes: Record<string, { x: number; y: number; w: number; h: number }> = {};
 const now = () => Math.round((Date.now() / 1000 - clockOffset - t0) * 100) / 100;
 const mark = (name: string) => {
   marks[name] = now();
@@ -56,7 +59,10 @@ const mark = (name: string) => {
 const hold = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await chromium.launch({ channel: "chrome", headless: true, args: [`--force-device-scale-factor=${SCALE}`, "--enable-gpu-rasterization", "--ignore-gpu-blocklist"] });
-const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: SCALE, colorScheme: "dark", reducedMotion: "no-preference" });
+// Light: the redesigned site's daytime sky reads on film; the night theme is mostly black.
+const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: SCALE, colorScheme: "light", reducedMotion: "no-preference" });
+// Duebook draws a still sky under test automation (navigator.webdriver); the film wants it moving.
+await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
 const page = await context.newPage();
 page.on("pageerror", (error) => console.log("pageerror", error.message));
 const cdp = await context.newCDPSession(page);
@@ -129,10 +135,10 @@ async function glideScroll(to: number, ms: number) {
   );
 }
 
-// Warm the caches, then film from a blank page in the site's own night colour.
+// Warm the caches, then film from a blank page in the site's own paper colour.
 await page.goto(`${base}/`, { waitUntil: "load" });
 await page.goto(`${base}/duebook/`, { waitUntil: "load" });
-await page.setContent(`<html><body style="margin:0;background:#0b0f1d"></body></html>`);
+await page.setContent(`<html><body style="margin:0;background:#f5f4f0"></body></html>`);
 await cdp.send("Page.startScreencast", { format: "jpeg", quality: 90, maxWidth: FRAME.w, maxHeight: FRAME.h, everyNthFrame: 1 });
 while (!t0) await hold(20);
 await hold(300);
@@ -159,6 +165,8 @@ try {
   await page.getByText("Northwind Studio").first().waitFor({ timeout: 20_000 });
   mark("invoices");
   notes.invoices = ((await page.locator("main, #root").first().innerText().catch(() => "")) || "").replace(/\s+/g, " ").slice(0, 400);
+  const card = await page.locator("li.invoice").filter({ hasText: "Northwind Studio" }).first().boundingBox();
+  if (card) boxes.invoice = { x: Math.round(card.x * SCALE), y: Math.round(card.y * SCALE), w: Math.round(card.width * SCALE), h: Math.round(card.height * SCALE) };
   await glideCursor(VIEW.width * 0.86, VIEW.height * 0.9);
   await hold(1500);
   await glideScroll(260, 1800);
@@ -170,7 +178,8 @@ try {
   ffmpeg.stdin.end();
   await new Promise((r) => ffmpeg.on("close", r));
   await browser.close();
-  writeFileSync(join(outDir, "live.json"), JSON.stringify({ fps: FPS, width: FRAME.w, height: FRAME.h, seconds: written / FPS, marks, notes }, null, 2) + "\n");
+  const filmed = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  writeFileSync(join(outDir, "live.json"), JSON.stringify({ fps: FPS, width: FRAME.w, height: FRAME.h, seconds: written / FPS, filmed, marks, boxes, notes }, null, 2) + "\n");
   console.log(`\n${(written / FPS).toFixed(1)}s of footage`);
   for (const [k, v] of Object.entries(notes)) console.log(`${k}: ${v}`);
 }

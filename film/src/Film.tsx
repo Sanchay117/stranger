@@ -8,7 +8,7 @@ import { Close } from "./scenes/Close.tsx";
 import { Ask, Fix, Hook, Loop } from "./scenes/Agent.tsx";
 import { Clean, Owner, Probe } from "./scenes/KaneRun.tsx";
 import { LiveScene } from "./scenes/Live.tsx";
-import { More } from "./scenes/More.tsx";
+import { Bench } from "./scenes/Bench.tsx";
 import { Replay } from "./scenes/Replay.tsx";
 import { Teaser } from "./scenes/Teaser.tsx";
 import { Captions } from "./ui/Captions.tsx";
@@ -38,7 +38,7 @@ const SCENES: Record<string, ComponentType<SceneProps>> = {
   "d-ask": Ask,
   "d-fix": Fix,
   "d-clean": Clean,
-  "d-more": More,
+  "d-bench": Bench,
   "d-live": LiveScene,
   "d-close": Close,
 };

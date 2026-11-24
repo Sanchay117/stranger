@@ -33,7 +33,7 @@ export function Thumbnail() {
           <GradientText>another's data?</GradientText>
         </div>
         <Label size={26} color={ink.soft} style={{ marginTop: 50 }}>
-          Kane CLI · coding agent · closed loop
+          Kane CLI · closed loop · 9 of 9 on the bench
         </Label>
       </div>
       <Grain amount={0.05} />
