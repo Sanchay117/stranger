@@ -489,7 +489,7 @@ function driftHint(cfg, t, kind, { live, anon, changed, forged }) {
   if (kind === 'off') {
     const ownerOnly = !(live?.policies ?? []).some((p) => p.open) && !found.all.some((p) => p.open) && (found.select.length || live?.policies?.length)
     return [
-      `Row Level Security is **off** for \`${t}\` in the live database right now, so its policies do nothing: every account can read every row${anon ? ', and so can anyone with the public key and no login' : ''}${also}.${found.rls === true ? ' Your migrations turn it on, so it was turned off by hand, in the dashboard or the SQL editor.' : found.rls === false ? ' Your migrations turn it off.' : ' Your migrations never turn it on.'} Turn it back on:`,
+      `Row Level Security is **off** for \`${t}\` in the live database right now, so its policies do nothing: every account can read every row${anon ? ' (so can anyone with just the public key)' : ''}${also}.${found.rls === true ? ' Your migrations turn it on, so it was turned off by hand, in the dashboard or the SQL editor.' : found.rls === false ? ' Your migrations turn it off.' : ' Your migrations never turn it on.'} Turn it back on:`,
       '',
       ...enable,
       `${ownerOnly ? `Once it is on, the policies already on \`${t}\` limit each account to its own rows, so no new policy is needed. ` : ''}${migration} This one change fixes everything above together. Then run Stranger again: the policies themselves only count once Row Level Security is on.`,
