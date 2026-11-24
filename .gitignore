@@ -1,5 +1,6 @@
 # Local strategy notes
 HACKATHON.md
+AGENTS.md
 
 # Stranger local state (history.jsonl and report.md stay tracked as proof)
 .stranger/runs/
