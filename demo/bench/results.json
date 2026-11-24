@@ -24,7 +24,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T8NZKNERXXKA6RHQVVYA8N/dashboard/share/US_BB40D5K3VONJ066GPIE2WU9JJFHMS6AU50NITTJZK57VFUGDL6UKVTY21A81ZCJJ?type=summary&agentView=true&fqdn=summary-page",
       "credits": 68.7,
       "seconds": 441,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-rls_off/"
     },
     {
       "id": "client_filter",
@@ -38,7 +39,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9216CS5AEH4DSQJE7YDE8/dashboard/share/US_OWT1NJN9T1Z8A47BEUY9UCR9NAXNQ2PU68U5ZCX543C7K1IWSZEDG01LS40U1928?type=summary&agentView=true&fqdn=summary-page",
       "credits": 60.5,
       "seconds": 401,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-client_filter/"
     },
     {
       "id": "leaky_view",
@@ -52,7 +54,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9F3B0DYMDMHNXJ8VVABYB/dashboard/share/US_CBF88BEURZGV1SM8HH2J2RCC27GYM960AD3E1BUPR0DWWB9VBHRATMNC0S8QCL9J?type=summary&agentView=true&fqdn=summary-page",
       "credits": 46.7,
       "seconds": 352,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-leaky_view/"
     },
     {
       "id": "leaky_rpc",
@@ -66,7 +69,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9R0QMH67JNQ2F0V21TS7F/dashboard/share/US_G70SXNVV9CT84483KSX4EL4HIEZ4K69MQYRLHIHH7WQJSU77GOBGBIZRY35XCBR6?type=summary&agentView=true&fqdn=summary-page",
       "credits": 50,
       "seconds": 239,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-leaky_rpc/"
     },
     {
       "id": "detail_page",
@@ -80,7 +84,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T85EAGETJ9DG02M1F9XS7X/dashboard/share/US_WWDE90TAK0QDFE0RJ0XMQSJEL9QKC46A8Z6IEDGY20WJS55HMIEPLQLZD40O3JQE?type=summary&agentView=true&fqdn=summary-page",
       "credits": 86.1,
       "seconds": 435,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-detail_page/"
     },
     {
       "id": "forged_insert",
@@ -99,7 +104,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7T9Y7YTA3NB34WCZXYQ3GKK/dashboard/share/US_A3MOZMA60CZZT7YR8ZILUQ9JFDI30JFZ0ND6W7LNMZ5TEFUL68ZJ52PANDTH0NC8?type=summary&agentView=true&fqdn=summary-page",
       "credits": 49.9,
       "seconds": 229,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-forged_insert/"
     },
     {
       "id": "leaky_total",
@@ -118,7 +124,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TA5VKTDN0KBXGMWVTQ0MAT/dashboard/share/US_ZQHUQ9UDC60XJ3TC5V4IGOZW6EKCCQO5SMAZYTYBOVKLYLA927ZLFVQJ3QRJBO0O?type=summary&agentView=true&fqdn=summary-page",
       "credits": 57.9,
       "seconds": 250,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-leaky_total/"
     },
     {
       "id": "storage_leak",
@@ -137,7 +144,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TACZWFZV12211TQP06BK3D/dashboard/share/US_6F4IKTUFA2G5KP95WORLKY5B45WCSY3B9N6XGKYGN1UV23M9JXF35PASDYB3V7KD?type=summary&agentView=true&fqdn=summary-page",
       "credits": 45.9,
       "seconds": 221,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-storage_leak/"
     },
     {
       "id": "broadcast_leak",
@@ -156,7 +164,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TAKR079PYZ3VK5V243BEZK/dashboard/share/US_WOB2MN6YHU91JFCV8TTFC19EYU5DV3UE1B52U2ZFK67TZIPX6Z4ITFPPR8GEO932?type=summary&agentView=true&fqdn=summary-page",
       "credits": 45.7,
       "seconds": 208,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-broadcast_leak/"
     },
     {
       "id": "all_good",
@@ -170,7 +179,8 @@
       "strangerRun": "https://test-manager.lambdatest.com/projects/01M7MEBMA112B980E8N84CQZNQ/test-cases/01M7TATPPWZBF3ZKM0HFBV0MAD/dashboard/share/US_FS53LVYGHM7C8MRK5NG4Y0X3RQGMS1SEFXE5CJSOYKYLM0F2KHWWEU14B8QK6U3A?type=summary&agentView=true&fqdn=summary-page",
       "credits": 77.6,
       "seconds": 300,
-      "caught": true
+      "caught": true,
+      "saved": "/runs/bench-all_good/"
     }
   ]
 }
