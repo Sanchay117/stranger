@@ -164,6 +164,31 @@ Done means: stranger run prints CLEAN.</code></pre>
   </div>
 </section>
 
+<section class="loops" id="loops" aria-labelledby="loops-title">
+  <p class="kicker">Checked this week, all real Kane CLI runs</p>
+  <h2 id="loops-title">The loop closes without us.</h2>
+  <ul class="loop-cards">
+    <li>
+      <p class="loop-runs"><span class="tag leak">LEAK</span><code>92a8e9</code><span class="arrow" aria-hidden="true">→</span><span class="tag agent">AGENT</span><span class="arrow" aria-hidden="true">→</span><span class="tag clean">CLEAN</span><code>66224d</code></p>
+      <h3>In GitHub Actions, with no human</h3>
+      <p>Label a pull request <code>stranger-fix</code>. Kane found the leak, Claude Code wrote the migration, Kane checked again, and the workflow committed the fix.</p>
+      <a class="link" href="https://github.com/Sanchay117/stranger/pull/11" target="_blank" rel="noopener">See pull request 11 ↗</a>
+    </li>
+    <li>
+      <p class="loop-runs"><span class="tag leak">LEAK</span><code>56eb00</code><span class="arrow" aria-hidden="true">→</span><span class="tag agent">AGENT</span><span class="arrow" aria-hidden="true">→</span><span class="tag clean">CLEAN</span><code>10dfea</code></p>
+      <h3>On an app we didn't write</h3>
+      <p>PennyFlow, an open-source finance tracker, run locally. CLEAN as shipped. With row level security off, LEAK. A fresh agent fixed it from the brief alone.</p>
+      <a class="link" href="/runs/56eb00/">Open Kane's LEAK run</a>
+    </li>
+    <li>
+      <p class="loop-runs"><span class="tag clean">9 of 9</span>bugs caught, control CLEAN</p>
+      <h3>On a bench of ten apps</h3>
+      <p>Nine small Supabase apps, each with a different leak, and one with none. Real Kane runs caught all nine and left the clean one alone.</p>
+      <a class="link" href="/bench/">Open the bench</a>
+    </li>
+  </ul>
+</section>
+
 <section class="how" id="how">
   <div class="how-head">
     <h2>One command. Two accounts. A fresh canary every run.</h2>
